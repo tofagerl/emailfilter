@@ -1,0 +1,59 @@
+# Email Filter Configuration
+
+# OpenAI API Key
+openai_api_key: "your_openai_api_key_here"
+
+# Email Accounts
+accounts:
+  - name: "Personal Gmail"
+    email: "your.email@gmail.com"
+    password: "your_app_password_here"  # Use app password for Gmail
+    imap_server: "imap.gmail.com"
+    imap_port: 993
+    ssl: true
+    folders:
+      - "INBOX"
+    
+  - name: "Work Email"
+    email: "your.work@example.com"
+    password: "your_password_here"
+    imap_server: "imap.example.com"
+    imap_port: 993
+    ssl: true
+    folders:
+      - "INBOX"
+      - "Important"
+
+# Processing Options
+options:
+  # Where to move emails after categorization
+  move_emails: true
+  
+  # Folder names for each category (create these folders in your email account)
+  category_folders:
+    spam: "[Spam]"
+    receipts: "[Receipts]"
+    promotions: "[Promotions]"
+    updates: "[Updates]"
+    inbox: "INBOX"  # Keep important emails in inbox
+  
+  # Mark emails as read after processing
+  mark_as_read: false
+  
+  # Add a label/flag to processed emails
+  add_processed_flag: true
+  
+  # Maximum number of emails to process per run
+  max_emails_per_run: 100
+  
+  # Batch size for API calls
+  batch_size: 10
+  
+  # Daemon mode options
+  
+  # IMAP IDLE timeout in seconds (default: 29 minutes)
+  # Most servers disconnect after 30 minutes of inactivity
+  idle_timeout: 1740
+  
+  # Delay in seconds before reconnecting after an error
+  reconnect_delay: 5 

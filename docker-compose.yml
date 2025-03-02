@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  emailfilter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emailfilter
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./config:/config
+    # Uncomment to run in one-time processing mode instead of daemon mode
+    # command: ["imap", "--config", "/config/config.yaml"]
+    # Uncomment to run with specific options
+    # command: ["imap", "--config", "/config/config.yaml", "--dry-run"]
