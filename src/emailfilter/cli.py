@@ -180,6 +180,44 @@ def parse_args() -> argparse.Namespace:
         help="Delete log entries older than this many days (default: 7)"
     )
     
+    # State command (for managing the local state)
+    state_parser = subparsers.add_parser("state", help="Manage local email processing state")
+    state_subparsers = state_parser.add_subparsers(dest="state_command", help="State command")
+    
+    # View state command
+    view_state_parser = state_subparsers.add_parser("view", help="View local email processing state")
+    view_state_parser.add_argument(
+        "--account",
+        type=str,
+        help="View state for a specific account"
+    )
+    view_state_parser.add_argument(
+        "--output", "-o",
+        type=str,
+        help="Path to output state (default: stdout)"
+    )
+    
+    # Clean state command
+    clean_state_parser = state_subparsers.add_parser("clean", help="Clean up local email processing state")
+    clean_state_parser.add_argument(
+        "--account",
+        type=str,
+        help="Clean state for a specific account"
+    )
+    
+    # Reset state command
+    reset_state_parser = state_subparsers.add_parser("reset", help="Reset local email processing state")
+    reset_state_parser.add_argument(
+        "--account",
+        type=str,
+        help="Reset state for a specific account"
+    )
+    reset_state_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Confirm reset without prompting"
+    )
+    
     return parser.parse_args()
 
 
@@ -348,7 +386,6 @@ def handle_imap_command(args: argparse.Namespace) -> None:
         # Apply command-line overrides
         if args.dry_run:
             processor.options["move_emails"] = False
-            processor.options["add_processed_flag"] = False
             processor.options["mark_as_read"] = False
             logger.info("Running in dry-run mode (no changes will be made)")
         
@@ -501,6 +538,93 @@ def handle_logs_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def handle_state_command(args: argparse.Namespace) -> None:
+    """Handle the state command."""
+    # Create a processor to access the state
+    processor = imap_client.EmailProcessor(args.config if hasattr(args, 'config') else 'config.yaml')
+    
+    if args.state_command == "view":
+        try:
+            # Get the state
+            state = processor.processed_state
+            
+            # Filter by account if specified
+            if args.account and args.account in state:
+                state = {args.account: state[args.account]}
+            
+            # Format the output
+            output = {}
+            for account, email_ids in state.items():
+                output[account] = {
+                    "processed_emails_count": len(email_ids),
+                    "email_ids": email_ids[:10] + ["..."] if len(email_ids) > 10 else email_ids
+                }
+            
+            # Output the results
+            if args.output:
+                with open(args.output, 'w') as f:
+                    json.dump(output, f, indent=2)
+                logger.info(f"Wrote state to {args.output}")
+            else:
+                print(json.dumps(output, indent=2))
+            
+        except Exception as e:
+            logger.error(f"Error viewing state: {e}")
+            sys.exit(1)
+    
+    elif args.state_command == "clean":
+        try:
+            # Clean up the state
+            processor._cleanup_processed_state()
+            logger.info("Cleaned up state")
+            
+            # If account is specified, show the count for that account
+            if args.account and args.account in processor.processed_state:
+                count = len(processor.processed_state[args.account])
+                logger.info(f"Account '{args.account}' now has {count} processed emails in state")
+            else:
+                # Show counts for all accounts
+                for account, email_ids in processor.processed_state.items():
+                    logger.info(f"Account '{account}' has {len(email_ids)} processed emails in state")
+            
+        except Exception as e:
+            logger.error(f"Error cleaning state: {e}")
+            sys.exit(1)
+    
+    elif args.state_command == "reset":
+        try:
+            # Confirm reset if not already confirmed
+            if not args.confirm:
+                confirm = input("Are you sure you want to reset the state? This will cause all emails to be reprocessed. (y/N): ")
+                if confirm.lower() != 'y':
+                    logger.info("Reset cancelled")
+                    return
+            
+            # Reset the state
+            if args.account:
+                # Reset only the specified account
+                if args.account in processor.processed_state:
+                    processor.processed_state[args.account] = []
+                    logger.info(f"Reset state for account '{args.account}'")
+                else:
+                    logger.warning(f"Account '{args.account}' not found in state")
+            else:
+                # Reset all accounts
+                processor.processed_state = {}
+                logger.info("Reset state for all accounts")
+            
+            # Save the state
+            processor._save_processed_state()
+            
+        except Exception as e:
+            logger.error(f"Error resetting state: {e}")
+            sys.exit(1)
+    
+    else:
+        logger.error(f"Unknown state command: {args.state_command}")
+        sys.exit(1)
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     args = parse_args()
@@ -517,7 +641,7 @@ def main() -> None:
     
     # Default to filter command if none specified
     if not args.command:
-        logger.error("No command specified. Use one of: filter, categorize, imap, daemon, logs")
+        logger.error("No command specified. Use one of: filter, categorize, imap, daemon, logs, state")
         sys.exit(1)
     
     # Handle the appropriate command
@@ -531,6 +655,8 @@ def main() -> None:
         handle_daemon_command(args)
     elif args.command == "logs":
         handle_logs_command(args)
+    elif args.command == "state":
+        handle_state_command(args)
 
 
 if __name__ == "__main__":

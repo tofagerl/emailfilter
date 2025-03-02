@@ -40,9 +40,6 @@ options:
   # Mark emails as read after processing
   mark_as_read: false
   
-  # Add a label/flag to processed emails
-  add_processed_flag: true
-  
   # Maximum number of emails to process per run
   max_emails_per_run: 100
   
@@ -56,4 +53,14 @@ options:
   idle_timeout: 1740
   
   # Delay in seconds before reconnecting after an error
-  reconnect_delay: 5 
+  reconnect_delay: 5
+
+# Local State System
+# The application now uses a local state system to track processed emails
+# instead of adding flags to emails. This state is stored in:
+# ~/.emailfilter/processed_emails.json
+#
+# You can manage this state using the CLI:
+# - View state: python -m emailfilter.cli state view
+# - Clean state: python -m emailfilter.cli state clean
+# - Reset state: python -m emailfilter.cli state reset 

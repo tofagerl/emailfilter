@@ -13,6 +13,7 @@ A Python application for filtering and processing emails, with OpenAI GPT-4o-min
   - Inbox: Important emails that need attention or quick response
 - IMAP integration to process emails directly from your accounts
 - Automatic organization of emails into appropriate folders
+- Local state system to track processed emails without modifying them
 - Real-time email monitoring using IMAP IDLE for push notifications
 - Command-line interface for easy integration
 - Batch processing to handle large email volumes
@@ -149,6 +150,60 @@ emailfilter categorize --input emails.json --category inbox --output important_e
 
 # Categorize all emails into their respective categories
 emailfilter categorize --input emails.json --category all --output categorized.json
+```
+
+## Local State System
+
+The application uses a local state system to track which emails have been processed, eliminating the need to modify emails by adding flags or labels. This approach has several benefits:
+
+- **Non-intrusive**: Emails in your mailbox remain unchanged
+- **Persistent**: The state is maintained between application restarts
+- **Portable**: The state can be backed up and restored easily
+- **Manageable**: You can view, clean, and reset the state as needed
+
+### How It Works
+
+The local state system stores a unique identifier for each processed email in a JSON file located at `~/.emailfilter/processed_emails.json`. This identifier is generated based on the email's account, message ID, sender, subject, and date.
+
+When the application processes emails, it checks this state file to determine which emails have already been processed, ensuring that each email is only processed once.
+
+### Managing the State
+
+You can manage the local state using the CLI:
+
+```bash
+# View the current state
+python -m emailfilter.cli state view
+
+# View state for a specific account
+python -m emailfilter.cli state view --account "Personal Gmail"
+
+# Clean up the state (removes excess entries)
+python -m emailfilter.cli state clean
+
+# Reset the state for all accounts (will cause all emails to be reprocessed)
+python -m emailfilter.cli state reset
+
+# Reset the state for a specific account
+python -m emailfilter.cli state reset --account "Personal Gmail"
+```
+
+### Testing the State System
+
+A test script is provided to help you understand and test the local state system:
+
+```bash
+# View the current state
+./test_local_state.py --action view
+
+# Add test emails to the state
+./test_local_state.py --action add --account "Test Account" --count 10
+
+# Clean up the state
+./test_local_state.py --action clean
+
+# Reset the state
+./test_local_state.py --action reset
 ```
 
 ## Configuration
