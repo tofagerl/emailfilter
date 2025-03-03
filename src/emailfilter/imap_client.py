@@ -25,6 +25,7 @@ from emailfilter import categorizer
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout  # Explicitly use stdout
 )
 logger = logging.getLogger(__name__)
 
@@ -462,10 +463,6 @@ class EmailProcessor:
                 if account_name:
                     self._mark_email_as_processed(account_name, msg_id, email_data)
                 
-                # Mark as read if configured
-                if self.options.get("mark_as_read", False):
-                    client.add_flags(msg_id, SEEN)
-                
                 # Move to appropriate folder if configured
                 if self.options.get("move_emails", True):
                     category_name = category.name.lower()
@@ -598,14 +595,24 @@ class EmailProcessor:
         """
         logger.info(f"Starting monitoring for {account}")
         
+        # Initialize reconnection parameters
+        max_retry_delay = 300  # 5 minutes
+        base_delay = 5  # 5 seconds
+        retry_delay = base_delay
+        
         while running:
             try:
                 client = self.connect_to_account(account)
                 
                 if not client:
-                    logger.error(f"Failed to connect to {account}, retrying in 60 seconds")
-                    time.sleep(60)
+                    logger.error(f"Failed to connect to {account}, retrying in {retry_delay} seconds")
+                    time.sleep(retry_delay)
+                    # Exponential backoff with maximum delay
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
                     continue
+                
+                # Reset retry delay on successful connection
+                retry_delay = base_delay
                 
                 # Process each folder
                 for folder in account.folders:
@@ -627,17 +634,18 @@ class EmailProcessor:
                             # Process categorized emails
                             self.process_categorized_emails(client, categorized_emails, folder, account.name)
                         
-                        # Start IDLE mode
+                        # Start IDLE mode with shorter timeouts for better error detection
                         logger.info(f"Entering IDLE mode for {folder}")
-                        idle_timeout = 5 * 60  # 5 minutes
+                        idle_timeout = self.options.get("idle_timeout", 1740)  # Default 29 minutes
+                        check_interval = 60  # Check connection every minute
                         
                         while running:
                             try:
-                                # Start IDLE mode
+                                # Start IDLE with a shorter timeout
                                 client.idle()
                                 
                                 # Wait for new emails or timeout
-                                responses = client.idle_check(timeout=idle_timeout)
+                                responses = client.idle_check(timeout=check_interval)
                                 
                                 # End IDLE mode
                                 client.idle_done()
@@ -664,11 +672,17 @@ class EmailProcessor:
                                     break
                                 
                             except Exception as e:
-                                logger.error(f"Error in IDLE mode for {folder}: {e}")
-                                break
+                                error_msg = str(e).lower()
+                                if "socket error: eof" in error_msg or "connection reset" in error_msg:
+                                    logger.warning(f"Connection lost for {folder}, will attempt to reconnect")
+                                    break
+                                else:
+                                    logger.error(f"Error in IDLE mode for {folder}: {e}")
+                                    break
                     
                     except Exception as e:
                         logger.error(f"Error monitoring folder {folder}: {e}")
+                        break
                 
                 # Clean up old entries from the processed state
                 self._cleanup_processed_state()
@@ -681,11 +695,13 @@ class EmailProcessor:
                     pass
                 
                 # Wait before reconnecting
-                time.sleep(60)
+                time.sleep(5)  # Short delay before reconnecting
                 
             except Exception as e:
                 logger.error(f"Error monitoring account {account}: {e}")
-                time.sleep(60)
+                time.sleep(retry_delay)
+                # Exponential backoff with maximum delay
+                retry_delay = min(retry_delay * 2, max_retry_delay)
         
         logger.info(f"Stopped monitoring for {account}")
 

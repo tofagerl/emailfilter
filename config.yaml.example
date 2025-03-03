@@ -37,9 +37,6 @@ options:
     updates: "[Updates]"
     inbox: "INBOX"  # Keep important emails in inbox
   
-  # Mark emails as read after processing
-  mark_as_read: false
-  
   # Maximum number of emails to process per run
   max_emails_per_run: 100
   

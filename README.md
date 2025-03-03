@@ -13,7 +13,7 @@ A Python application for filtering and processing emails, with OpenAI GPT-4o-min
   - Inbox: Important emails that need attention or quick response
 - IMAP integration to process emails directly from your accounts
 - Automatic organization of emails into appropriate folders
-- Local state system to track processed emails without modifying them
+- Non-intrusive local state system to track processed emails
 - Real-time email monitoring using IMAP IDLE for push notifications
 - Command-line interface for easy integration
 - Batch processing to handle large email volumes
@@ -242,6 +242,17 @@ options:
   idle_timeout: 1740 # IMAP IDLE timeout in seconds (29 minutes)
   reconnect_delay: 5 # Delay before reconnecting after an error
 ```
+
+## Non-Intrusive Operation
+
+The application is designed to be non-intrusive and will not modify your emails in any way:
+
+- No flags or labels are added to emails
+- No read/unread status is changed
+- No email content is modified
+- Only folder moves are performed (if configured)
+
+The application uses a local state system to track which emails have been processed, ensuring that each email is only processed once without modifying the emails themselves.
 
 ## Running as a Service
 

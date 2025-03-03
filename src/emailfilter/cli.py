@@ -11,7 +11,7 @@ from emailfilter import categorizer, filter, imap_client
 
 # Configure logging
 logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
+handler = logging.StreamHandler(sys.stdout)  # Explicitly use stdout
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
@@ -386,7 +386,6 @@ def handle_imap_command(args: argparse.Namespace) -> None:
         # Apply command-line overrides
         if args.dry_run:
             processor.options["move_emails"] = False
-            processor.options["mark_as_read"] = False
             logger.info("Running in dry-run mode (no changes will be made)")
         
         if args.max_emails:
