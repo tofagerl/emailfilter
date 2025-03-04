@@ -14,14 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# Copy project files
 COPY pyproject.toml README.md ./
+COPY src ./src/
 
-# Install dependencies
+# Install the package and its dependencies
 RUN pip install --upgrade pip && \
-    pip install wheel hatchling && \
-    pip wheel --no-cache-dir --wheel-dir /app/wheels -e . && \
-    pip wheel --no-cache-dir --wheel-dir /app/wheels hatchling
+    pip install wheel && \
+    pip install -e . && \
+    pip freeze > /app/requirements.txt && \
+    pip wheel --no-cache-dir --wheel-dir /app/wheels -r /app/requirements.txt
 
 # Final stage
 FROM python:3.10-slim
@@ -40,15 +42,16 @@ RUN groupadd -r emailfilter && \
     mkdir -p /config /home/emailfilter && \
     chown -R emailfilter:emailfilter /config /home/emailfilter
 
-# Copy wheels from builder stage
+# Copy wheels and project files from builder stage
 COPY --from=builder /app/wheels /wheels
+COPY --from=builder /app/requirements.txt /app/
 COPY --from=builder /app/pyproject.toml /app/README.md ./
 COPY src ./src/
 
-# Install the package
+# Install the package from wheels
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --no-index --find-links=/wheels hatchling && \
-    pip install --no-cache-dir --no-index --find-links=/wheels -e . && \
+    pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt && \
+    pip install --no-cache-dir -e . && \
     rm -rf /wheels
 
 # Set volume for configuration
