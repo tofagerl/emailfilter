@@ -18,12 +18,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md ./
 COPY src ./src/
 
-# Install the package and its dependencies
+# Install build dependencies explicitly
 RUN pip install --upgrade pip && \
-    pip install wheel && \
-    pip install -e . && \
-    pip freeze > /app/requirements.txt && \
-    pip wheel --no-cache-dir --wheel-dir /app/wheels -r /app/requirements.txt
+    pip install wheel hatchling editables
+
+# Build the package as a wheel
+RUN pip wheel --no-cache-dir --wheel-dir /app/wheels .
+
+# Also build wheels for dependencies
+RUN pip wheel --no-cache-dir --wheel-dir /app/wheels hatchling editables openai pyyaml
 
 # Final stage
 FROM python:3.10-slim
@@ -44,14 +47,11 @@ RUN groupadd -r emailfilter && \
 
 # Copy wheels and project files from builder stage
 COPY --from=builder /app/wheels /wheels
-COPY --from=builder /app/requirements.txt /app/
-COPY --from=builder /app/pyproject.toml /app/README.md ./
 COPY src ./src/
 
 # Install the package from wheels
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt && \
-    pip install --no-cache-dir -e . && \
+    pip install --no-cache-dir --no-index --find-links=/wheels emailfilter && \
     rm -rf /wheels
 
 # Set volume for configuration
