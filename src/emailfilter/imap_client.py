@@ -428,6 +428,20 @@ class EmailProcessor:
         
         return categorized_emails
 
+    def _ensure_folder_exists(self, client: IMAPClient, folder: str) -> None:
+        """Ensure a folder exists, create it if it doesn't.
+        
+        Args:
+            client: The IMAPClient object
+            folder: The folder name to check/create
+        """
+        folders = [f.decode() if isinstance(f, bytes) else f for f in client.list_folders()]
+        folder_names = [f[2] for f in folders]
+        
+        if folder not in folder_names:
+            logger.info(f"Creating folder: {folder}")
+            client.create_folder(folder)
+
     def process_categorized_emails(
         self,
         client: IMAPClient,
@@ -476,13 +490,8 @@ class EmailProcessor:
                     target_folder = category_folders.get(category_name)
                     
                     if target_folder and (current_folder is None or target_folder != current_folder):
-                        # Check if folder exists, create if needed
-                        folders = [f.decode() if isinstance(f, bytes) else f for f in client.list_folders()]
-                        folder_names = [f[2] for f in folders]
-                        
-                        if target_folder not in folder_names:
-                            logger.info(f"Creating folder: {target_folder}")
-                            client.create_folder(target_folder)
+                        # Ensure target folder exists
+                        self._ensure_folder_exists(client, target_folder)
                         
                         # Move the message
                         client.move(msg_id, target_folder)

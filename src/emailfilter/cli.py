@@ -1,75 +1,145 @@
-"""Command-line interface for the emailfilter package."""
+"""Command-line interface for emailfilter."""
 
 import argparse
 import json
+import logging
 import os
 import sys
-import logging
-import yaml
 from typing import Dict, List, Optional
 
-from emailfilter import categorizer, filter, imap_client
+from emailfilter import categorizer
+from emailfilter.email_processor import main as email_processor_main
+from emailfilter.models import Email
 
 # Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout
+)
 logger = logging.getLogger(__name__)
-handler = logging.StreamHandler(sys.stdout)  # Explicitly use stdout
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-
-# Get version from package
-try:
-    from importlib.metadata import version
-    __version__ = version("emailfilter")
-except (ImportError, ModuleNotFoundError):
-    __version__ = "0.1.0"  # Default version if not installed
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Filter and categorize emails")
-    
-    # Add version argument
-    parser.add_argument(
-        "--version", "-v",
-        action="store_true",
-        help="Show version and exit"
-    )
-    
-    # Add logging level argument
-    parser.add_argument(
-        "--log-level",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default="INFO",
-        help="Set the logging level"
-    )
-    
-    # Create subparsers for different commands
-    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
-    
-    # Filter command
-    filter_parser = subparsers.add_parser("filter", help="Filter emails based on criteria")
-    filter_parser.add_argument(
-        "--input", "-i", 
-        type=str, 
-        required=True,
-        help="Path to JSON file containing emails"
-    )
-    filter_parser.add_argument(
-        "--output", "-o", 
-        type=str, 
-        help="Path to output filtered emails (default: stdout)"
-    )
-    filter_parser.add_argument(
-        "--filter", "-f", 
-        type=str, 
-        action="append",
-        help="Filter criteria in format 'key:value' (can be used multiple times)"
-    )
+def handle_categorize_command(args):
+    """Handle the categorize command."""
+    try:
+        # Load emails from input file
+        with open(args.input, "r") as f:
+            emails = json.load(f)
+        
+        # Load API key from config
+        try:
+            categorizer.load_api_key(args.config)
+        except Exception as e:
+            logger.error(f"Error loading API key: {e}")
+            sys.exit(1)
+        
+        # Clean up old logs if requested
+        if args.cleanup_logs:
+            deleted = categorizer.cleanup_old_logs(args.cleanup_logs_days)
+            logger.info(f"Deleted {deleted} old log files")
+        
+        # Categorize emails
+        if args.custom_categories:
+            with open(args.custom_categories, "r") as f:
+                categories = json.load(f)
+            
+            if args.category != "all":
+                logger.info(f"Filtering by custom category: {args.category}")
+                results = categorizer.categorize_and_filter_with_custom_categories(emails, categories)
+                filtered_emails = results.get(args.category, [])
+                logger.info(f"Found {len(filtered_emails)} emails in category {args.category}")
+                
+                # Write results to output file
+                with open(args.output, "w") as f:
+                    json.dump(filtered_emails, f, indent=2)
+            else:
+                logger.info("Categorizing emails with custom categories")
+                results = categorizer.categorize_and_filter_with_custom_categories(emails, categories)
+                
+                # Write results to output file
+                with open(args.output, "w") as f:
+                    json.dump(results, f, indent=2)
+                
+                # Print summary
+                for category, emails in results.items():
+                    logger.info(f"Category {category}: {len(emails)} emails")
+        else:
+            if args.category != "all":
+                logger.info(f"Filtering by category: {args.category}")
+                category_enum = getattr(categorizer.EmailCategory, args.category.upper())
+                results = categorizer.categorize_and_filter(emails)
+                filtered_emails = results.get(category_enum, [])
+                logger.info(f"Found {len(filtered_emails)} emails in category {category_enum}")
+                
+                # Write results to output file
+                with open(args.output, "w") as f:
+                    json.dump(filtered_emails, f, indent=2)
+            else:
+                logger.info("Categorizing emails")
+                results = categorizer.categorize_and_filter(emails)
+                
+                # Convert results to serializable format
+                serializable_results = {}
+                for category, emails in results.items():
+                    serializable_results[category.name.lower()] = emails
+                
+                # Write results to output file
+                with open(args.output, "w") as f:
+                    json.dump(serializable_results, f, indent=2)
+                
+                # Print summary
+                for category, emails in results.items():
+                    logger.info(f"Category {category}: {len(emails)} emails")
+    except Exception as e:
+        logger.error(f"Error categorizing email: {e}")
+        sys.exit(1)
+
+
+def handle_imap_command(args):
+    """Handle the imap command."""
+    try:
+        # Run the email processor
+        email_processor_main(args.config, args.daemon)
+    except Exception as e:
+        logger.error(f"Error processing emails: {e}")
+        sys.exit(1)
+
+
+def handle_filter_command(args):
+    """Handle the filter command."""
+    try:
+        # Load emails from input file
+        with open(args.input, "r") as f:
+            emails = json.load(f)
+        
+        # Load filters from filter file
+        with open(args.filters, "r") as f:
+            filters = json.load(f)
+        
+        # Apply filters
+        from emailfilter.filter import filter_emails
+        filtered_emails = filter_emails(emails, filters)
+        
+        # Write results to output file
+        with open(args.output, "w") as f:
+            json.dump(filtered_emails, f, indent=2)
+        
+        # Print summary
+        for filter_name, emails in filtered_emails.items():
+            logger.info(f"Filter {filter_name}: {len(emails)} emails")
+    except Exception as e:
+        logger.error(f"Error filtering emails: {e}")
+        sys.exit(1)
+
+
+def main():
+    """Main entry point for the CLI."""
+    parser = argparse.ArgumentParser(description="Email filtering and categorization tool")
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
     
     # Categorize command
-    categorize_parser = subparsers.add_parser("categorize", help="Categorize emails using OpenAI API")
+    categorize_parser = subparsers.add_parser("categorize", help="Categorize emails")
     categorize_parser.add_argument(
         "--config", "-c",
         type=str,
@@ -77,15 +147,16 @@ def parse_args() -> argparse.Namespace:
         help="Path to YAML configuration file"
     )
     categorize_parser.add_argument(
-        "--input", "-i", 
-        type=str, 
+        "--input", "-i",
+        type=str,
         required=True,
-        help="Path to JSON file containing emails"
+        help="Path to input JSON file containing emails"
     )
     categorize_parser.add_argument(
-        "--output", "-o", 
-        type=str, 
-        help="Path to output categorized emails (default: stdout)"
+        "--output", "-o",
+        type=str,
+        default="categorized_emails.json",
+        help="Path to output JSON file (default: categorized_emails.json)"
     )
     categorize_parser.add_argument(
         "--category", "-cat",
@@ -95,26 +166,22 @@ def parse_args() -> argparse.Namespace:
         help="Category to filter by (default: all)"
     )
     categorize_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=10,
-        help="Number of emails to process in each batch (default: 10)"
-    )
-    categorize_parser.add_argument(
         "--custom-categories",
-        action="store_true",
-        help="Use custom categories defined in a JSON file"
-    )
-    categorize_parser.add_argument(
-        "--categories-file",
         type=str,
         help="Path to JSON file containing custom categories"
     )
     categorize_parser.add_argument(
         "--cleanup-logs",
         action="store_true",
-        help="Clean up old log entries (older than 7 days)"
+        help="Clean up old log files"
     )
+    categorize_parser.add_argument(
+        "--cleanup-logs-days",
+        type=int,
+        default=7,
+        help="Maximum age of log files in days (default: 7)"
+    )
+    categorize_parser.set_defaults(func=handle_categorize_command)
     
     # IMAP command
     imap_parser = subparsers.add_parser("imap", help="Process emails from IMAP accounts")
@@ -125,542 +192,42 @@ def parse_args() -> argparse.Namespace:
         help="Path to YAML configuration file"
     )
     imap_parser.add_argument(
-        "--account", "-a",
-        type=str,
-        help="Process only the specified account (by name)"
-    )
-    imap_parser.add_argument(
-        "--folder", "-f",
-        type=str,
-        help="Process only the specified folder"
-    )
-    imap_parser.add_argument(
-        "--max-emails", "-m",
-        type=int,
-        default=100,
-        help="Maximum number of emails to process per folder (default: 100)"
-    )
-    imap_parser.add_argument(
-        "--dry-run", "-d",
+        "--daemon", "-d",
         action="store_true",
-        help="Categorize emails but don't move them or mark them as processed"
+        help="Run in daemon mode (continuous monitoring)"
     )
-    imap_parser.add_argument(
-        "--daemon",
-        action="store_true",
-        help="Run in continuous monitoring mode using IMAP IDLE"
-    )
+    imap_parser.set_defaults(func=handle_imap_command)
     
-    # Daemon command (dedicated command for running as a service)
-    daemon_parser = subparsers.add_parser("daemon", help="Run as a daemon service with continuous email monitoring")
-    daemon_parser.add_argument(
-        "--config", "-c",
+    # Filter command
+    filter_parser = subparsers.add_parser("filter", help="Filter emails")
+    filter_parser.add_argument(
+        "--input", "-i",
         type=str,
         required=True,
-        help="Path to YAML configuration file"
+        help="Path to input JSON file containing emails"
     )
-    
-    # Logs command
-    logs_parser = subparsers.add_parser("logs", help="Manage OpenAI interaction logs")
-    logs_subparsers = logs_parser.add_subparsers(dest="logs_command", help="Logs command")
-    
-    # View logs command
-    view_logs_parser = logs_subparsers.add_parser("view", help="View OpenAI interaction logs")
-    view_logs_parser.add_argument(
-        "--limit",
-        type=int,
-        default=10,
-        help="Maximum number of log entries to display (default: 10)"
-    )
-    view_logs_parser.add_argument(
+    filter_parser.add_argument(
         "--output", "-o",
         type=str,
-        help="Path to output logs (default: stdout)"
+        default="filtered_emails.json",
+        help="Path to output JSON file (default: filtered_emails.json)"
     )
-    
-    # Clean logs command
-    clean_logs_parser = logs_subparsers.add_parser("clean", help="Clean up old log entries")
-    clean_logs_parser.add_argument(
-        "--days",
-        type=int,
-        default=7,
-        help="Delete log entries older than this many days (default: 7)"
-    )
-    
-    # State command (for managing the local state)
-    state_parser = subparsers.add_parser("state", help="Manage local email processing state")
-    state_subparsers = state_parser.add_subparsers(dest="state_command", help="State command")
-    
-    # View state command
-    view_state_parser = state_subparsers.add_parser("view", help="View local email processing state")
-    view_state_parser.add_argument(
-        "--account",
+    filter_parser.add_argument(
+        "--filters", "-f",
         type=str,
-        help="View state for a specific account"
+        required=True,
+        help="Path to JSON file containing filters"
     )
-    view_state_parser.add_argument(
-        "--output", "-o",
-        type=str,
-        help="Path to output state (default: stdout)"
-    )
+    filter_parser.set_defaults(func=handle_filter_command)
     
-    # Clean state command
-    clean_state_parser = state_subparsers.add_parser("clean", help="Clean up local email processing state")
-    clean_state_parser.add_argument(
-        "--account",
-        type=str,
-        help="Clean state for a specific account"
-    )
+    # Parse arguments
+    args = parser.parse_args()
     
-    # Reset state command
-    reset_state_parser = state_subparsers.add_parser("reset", help="Reset local email processing state")
-    reset_state_parser.add_argument(
-        "--account",
-        type=str,
-        help="Reset state for a specific account"
-    )
-    reset_state_parser.add_argument(
-        "--confirm",
-        action="store_true",
-        help="Confirm reset without prompting"
-    )
-    
-    return parser.parse_args()
-
-
-def load_emails(file_path: str) -> List[Dict[str, str]]:
-    """Load emails from a JSON file."""
-    try:
-        with open(file_path, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError) as e:
-        logger.error(f"Error loading emails: {e}")
-        sys.exit(1)
-
-
-def load_custom_categories(file_path: str) -> List[Dict[str, str]]:
-    """Load custom categories from a JSON file."""
-    try:
-        with open(file_path, "r") as f:
-            categories = json.load(f)
-            logger.info(f"Loaded {len(categories)} custom categories from {file_path}")
-            return categories
-    except (json.JSONDecodeError, FileNotFoundError) as e:
-        logger.error(f"Error loading custom categories: {e}")
-        sys.exit(1)
-
-
-def parse_filters(filter_args: Optional[List[str]]) -> Optional[Dict[str, str]]:
-    """Parse filter arguments into a dictionary."""
-    if not filter_args:
-        return None
-    
-    filters = {}
-    for f in filter_args:
-        try:
-            key, value = f.split(":", 1)
-            filters[key] = value
-        except ValueError:
-            logger.error(f"Invalid filter format: {f}. Use 'key:value'")
-    
-    return filters
-
-
-def handle_filter_command(args: argparse.Namespace) -> None:
-    """Handle the filter command."""
-    logger.info(f"Loading emails from {args.input}")
-    emails = load_emails(args.input)
-    
-    filters = parse_filters(args.filter)
-    logger.info(f"Applying filters: {filters}")
-    filtered_emails = filter.filter_emails(emails, filters)
-    
-    logger.info(f"Filtered {len(filtered_emails)} emails out of {len(emails)}")
-    
-    if args.output:
-        with open(args.output, "w") as f:
-            json.dump(filtered_emails, f, indent=2)
-        logger.info(f"Wrote filtered emails to {args.output}")
+    # Run command
+    if hasattr(args, "func"):
+        args.func(args)
     else:
-        print(json.dumps(filtered_emails, indent=2))
-
-
-def handle_categorize_command(args: argparse.Namespace) -> None:
-    """Handle the categorize command."""
-    logger.info(f"Loading emails from {args.input}")
-    emails = load_emails(args.input)
-    
-    # Load OpenAI API key from config file
-    try:
-        categorizer.load_api_key(args.config)
-    except ValueError as e:
-        logger.error(str(e))
-        sys.exit(1)
-    
-    # Clean up old logs if requested
-    if args.cleanup_logs:
-        deleted_count = categorizer.cleanup_old_logs()
-        logger.info(f"Cleaned up {deleted_count} old log entries")
-    
-    try:
-        if args.custom_categories:
-            # Use custom categories if specified
-            if args.categories_file:
-                categories = load_custom_categories(args.categories_file)
-            else:
-                # Default custom categories
-                categories = [
-                    {"id": 1, "name": "SPAM", "description": "Unwanted, unsolicited emails that might be scams or junk"},
-                    {"id": 2, "name": "RECEIPTS", "description": "Transaction confirmations, receipts, order updates"},
-                    {"id": 3, "name": "PROMOTIONS", "description": "Marketing emails, newsletters, offers, discounts"},
-                    {"id": 4, "name": "UPDATES", "description": "Non-urgent notifications, social media updates, news"},
-                    {"id": 5, "name": "INBOX", "description": "Important emails that need attention or quick response"}
-                ]
-                logger.info(f"Using default custom categories")
-            
-            if args.category == "all":
-                # Categorize all emails with custom categories
-                logger.info(f"Categorizing {len(emails)} emails with custom categories")
-                categorized = categorizer.batch_categorize_emails_with_custom_categories(emails, categories)
-                
-                # Group emails by category
-                result = {}
-                for item in categorized:
-                    category_name = item["category"]["name"]
-                    if category_name not in result:
-                        result[category_name] = []
-                    result[category_name].append(item["email"])
-            else:
-                # Filter by the specified category
-                logger.info(f"Categorizing and filtering emails by category: {args.category}")
-                all_categorized = categorizer.categorize_and_filter_with_custom_categories(emails, categories)
-                result = {
-                    args.category.capitalize(): all_categorized.get(args.category.upper(), [])
-                }
-        else:
-            # Use default categories
-            if args.category == "all":
-                # Categorize all emails and group by category
-                logger.info(f"Categorizing {len(emails)} emails with default categories")
-                categorized = categorizer.batch_categorize_emails(emails, args.batch_size)
-                
-                # Group emails by category
-                result = {}
-                for item in categorized:
-                    category = item["category"]
-                    if category not in result:
-                        result[category] = []
-                    result[category].append(item["email"])
-            else:
-                # Map string category to enum
-                category_map = {
-                    "spam": categorizer.EmailCategory.SPAM,
-                    "receipts": categorizer.EmailCategory.RECEIPTS,
-                    "promotions": categorizer.EmailCategory.PROMOTIONS,
-                    "updates": categorizer.EmailCategory.UPDATES,
-                    "inbox": categorizer.EmailCategory.INBOX
-                }
-                
-                # Categorize all emails and filter by the specified category
-                logger.info(f"Categorizing and filtering emails by category: {args.category}")
-                all_categorized = categorizer.categorize_and_filter(emails)
-                result = {
-                    args.category.capitalize(): all_categorized[category_map[args.category]]
-                }
-        
-        # Output the results
-        if args.output:
-            with open(args.output, "w") as f:
-                json.dump(result, f, indent=2)
-            logger.info(f"Wrote categorized emails to {args.output}")
-        else:
-            print(json.dumps(result, indent=2))
-            
-    except ValueError as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-
-
-def handle_imap_command(args: argparse.Namespace) -> None:
-    """Handle the IMAP command."""
-    try:
-        # Create the email processor
-        logger.info(f"Loading configuration from {args.config}")
-        processor = imap_client.EmailProcessor(args.config)
-        
-        # Apply command-line overrides
-        if args.dry_run:
-            processor.options["move_emails"] = False
-            logger.info("Running in dry-run mode (no changes will be made)")
-        
-        if args.max_emails:
-            processor.options["max_emails_per_run"] = args.max_emails
-            logger.info(f"Set maximum emails per run to {args.max_emails}")
-        
-        # Check if we should run in daemon mode
-        if args.daemon:
-            logger.info("Starting continuous email monitoring...")
-            logger.info("Press Ctrl+C to stop")
-            
-            # Run in daemon mode
-            if args.account:
-                logger.info("Note: In daemon mode, the --account option is ignored. All accounts will be monitored.")
-            
-            if args.folder:
-                logger.info("Note: In daemon mode, the --folder option is ignored. All configured folders will be monitored.")
-            
-            processor.start_monitoring()
-            return
-        
-        # Process accounts
-        if args.account:
-            # Process only the specified account
-            account_found = False
-            for account in processor.accounts:
-                if account.name == args.account:
-                    account_found = True
-                    
-                    # Override folders if specified
-                    if args.folder:
-                        account.folders = [args.folder]
-                        logger.info(f"Processing only folder: {args.folder}")
-                    
-                    logger.info(f"Processing account: {account}")
-                    results = {account.name: processor.process_account(account)}
-                    break
-            
-            if not account_found:
-                logger.error(f"Account '{args.account}' not found in configuration")
-                sys.exit(1)
-        else:
-            # Process all accounts
-            logger.info("Processing all accounts")
-            results = processor.process_all_accounts()
-        
-        # Print summary
-        logger.info("\nEmail Processing Summary:")
-        logger.info("=" * 50)
-        
-        for account_name, account_results in results.items():
-            logger.info(f"\nAccount: {account_name}")
-            
-            for folder, category_counts in account_results.items():
-                logger.info(f"  Folder: {folder}")
-                
-                total = sum(category_counts.values())
-                if total == 0:
-                    logger.info("    No emails processed")
-                    continue
-                
-                for category, count in category_counts.items():
-                    if count > 0:
-                        logger.info(f"    {category}: {count} emails")
-        
-        logger.info("\nProcessing complete!")
-        
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-
-
-def handle_daemon_command(args: argparse.Namespace) -> None:
-    """Handle the daemon command."""
-    try:
-        logger.info("Starting Email Filter daemon service...")
-        logger.info("Press Ctrl+C to stop")
-        
-        # Create the email processor and start monitoring
-        processor = imap_client.EmailProcessor(args.config)
-        processor.start_monitoring()
-        
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-
-
-def handle_logs_command(args: argparse.Namespace) -> None:
-    """Handle the logs command."""
-    if args.logs_command == "view":
-        try:
-            log_file = 'logs/detailed_openai_logs.jsonl'
-            if not os.path.exists(log_file):
-                logger.error(f"Log file not found: {log_file}")
-                sys.exit(1)
-            
-            # Read the log file
-            with open(log_file, 'r') as f:
-                lines = f.readlines()
-            
-            # Parse the log entries
-            log_entries = []
-            for line in lines:
-                try:
-                    entry = json.loads(line)
-                    log_entries.append(entry)
-                except json.JSONDecodeError:
-                    continue
-            
-            # Sort by timestamp (newest first)
-            log_entries.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-            
-            # Limit the number of entries
-            log_entries = log_entries[:args.limit]
-            
-            # Format the output
-            output = []
-            for entry in log_entries:
-                output.append({
-                    'timestamp': entry.get('timestamp', ''),
-                    'email_subject': entry.get('email_subject', ''),
-                    'email_from': entry.get('email_from', ''),
-                    'category_result': entry.get('category_result', ''),
-                    'response_received': entry.get('response_received', '')
-                })
-            
-            # Output the results
-            if args.output:
-                with open(args.output, 'w') as f:
-                    json.dump(output, f, indent=2)
-                logger.info(f"Wrote log entries to {args.output}")
-            else:
-                print(json.dumps(output, indent=2))
-            
-        except Exception as e:
-            logger.error(f"Error viewing logs: {e}")
-            sys.exit(1)
-    
-    elif args.logs_command == "clean":
-        try:
-            deleted_count = categorizer.cleanup_old_logs(args.days)
-            logger.info(f"Cleaned up {deleted_count} log entries older than {args.days} days")
-        except Exception as e:
-            logger.error(f"Error cleaning logs: {e}")
-            sys.exit(1)
-    
-    else:
-        logger.error(f"Unknown logs command: {args.logs_command}")
-        sys.exit(1)
-
-
-def handle_state_command(args: argparse.Namespace) -> None:
-    """Handle the state command."""
-    # Create a processor to access the state
-    processor = imap_client.EmailProcessor(args.config if hasattr(args, 'config') else 'config.yaml')
-    
-    if args.state_command == "view":
-        try:
-            # Get the state
-            state = processor.processed_state
-            
-            # Filter by account if specified
-            if args.account and args.account in state:
-                state = {args.account: state[args.account]}
-            
-            # Format the output
-            output = {}
-            for account, email_ids in state.items():
-                output[account] = {
-                    "processed_emails_count": len(email_ids),
-                    "email_ids": email_ids[:10] + ["..."] if len(email_ids) > 10 else email_ids
-                }
-            
-            # Output the results
-            if args.output:
-                with open(args.output, 'w') as f:
-                    json.dump(output, f, indent=2)
-                logger.info(f"Wrote state to {args.output}")
-            else:
-                print(json.dumps(output, indent=2))
-            
-        except Exception as e:
-            logger.error(f"Error viewing state: {e}")
-            sys.exit(1)
-    
-    elif args.state_command == "clean":
-        try:
-            # Clean up the state
-            processor._cleanup_processed_state()
-            logger.info("Cleaned up state")
-            
-            # If account is specified, show the count for that account
-            if args.account and args.account in processor.processed_state:
-                count = len(processor.processed_state[args.account])
-                logger.info(f"Account '{args.account}' now has {count} processed emails in state")
-            else:
-                # Show counts for all accounts
-                for account, email_ids in processor.processed_state.items():
-                    logger.info(f"Account '{account}' has {len(email_ids)} processed emails in state")
-            
-        except Exception as e:
-            logger.error(f"Error cleaning state: {e}")
-            sys.exit(1)
-    
-    elif args.state_command == "reset":
-        try:
-            # Confirm reset if not already confirmed
-            if not args.confirm:
-                confirm = input("Are you sure you want to reset the state? This will cause all emails to be reprocessed. (y/N): ")
-                if confirm.lower() != 'y':
-                    logger.info("Reset cancelled")
-                    return
-            
-            # Reset the state
-            if args.account:
-                # Reset only the specified account
-                if args.account in processor.processed_state:
-                    processor.processed_state[args.account] = []
-                    logger.info(f"Reset state for account '{args.account}'")
-                else:
-                    logger.warning(f"Account '{args.account}' not found in state")
-            else:
-                # Reset all accounts
-                processor.processed_state = {}
-                logger.info("Reset state for all accounts")
-            
-            # Save the state
-            processor._save_processed_state()
-            
-        except Exception as e:
-            logger.error(f"Error resetting state: {e}")
-            sys.exit(1)
-    
-    else:
-        logger.error(f"Unknown state command: {args.state_command}")
-        sys.exit(1)
-
-
-def main() -> None:
-    """Main entry point for the CLI."""
-    args = parse_args()
-    
-    # Set logging level
-    logging.getLogger().setLevel(getattr(logging, args.log_level))
-    logger.setLevel(getattr(logging, args.log_level))
-    categorizer.logger.setLevel(getattr(logging, args.log_level))
-    
-    # Check if version flag is set
-    if args.version:
-        print(f"Email Filter version {__version__}")
-        sys.exit(0)
-    
-    # Default to filter command if none specified
-    if not args.command:
-        logger.error("No command specified. Use one of: filter, categorize, imap, daemon, logs, state")
-        sys.exit(1)
-    
-    # Handle the appropriate command
-    if args.command == "filter":
-        handle_filter_command(args)
-    elif args.command == "categorize":
-        handle_categorize_command(args)
-    elif args.command == "imap":
-        handle_imap_command(args)
-    elif args.command == "daemon":
-        handle_daemon_command(args)
-    elif args.command == "logs":
-        handle_logs_command(args)
-    elif args.command == "state":
-        handle_state_command(args)
+        parser.print_help()
 
 
 if __name__ == "__main__":

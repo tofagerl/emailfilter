@@ -1,0 +1,167 @@
+"""Manages IMAP connections and folder operations."""
+
+import logging
+from typing import Dict, List, Optional, Tuple
+
+from imapclient import IMAPClient
+
+from .models import Email, EmailAccount
+
+logger = logging.getLogger(__name__)
+
+class IMAPManager:
+    """Manages IMAP connections and folder operations."""
+    
+    def __init__(self):
+        """Initialize the IMAP manager."""
+        self.connections: Dict[str, IMAPClient] = {}
+    
+    def connect(self, account: EmailAccount) -> Optional[IMAPClient]:
+        """Connect to an IMAP server.
+        
+        Args:
+            account: The email account to connect to
+            
+        Returns:
+            An IMAPClient object if connection successful, None otherwise
+        """
+        try:
+            # Check if already connected
+            if account.name in self.connections and self.connections[account.name].is_connected:
+                logger.info(f"Already connected to {account}")
+                return self.connections[account.name]
+            
+            # Create new connection
+            logger.info(f"Connecting to {account}")
+            client = IMAPClient(account.imap_server, port=account.imap_port, ssl=account.ssl)
+            client.login(account.email_address, account.password)
+            
+            # Store connection
+            self.connections[account.name] = client
+            logger.info(f"Connected to {account}")
+            return client
+        except Exception as e:
+            logger.error(f"Error connecting to {account}: {e}")
+            return None
+    
+    def disconnect(self, account_name: str) -> None:
+        """Disconnect from an IMAP server.
+        
+        Args:
+            account_name: Name of the account to disconnect from
+        """
+        if account_name in self.connections:
+            try:
+                self.connections[account_name].logout()
+                logger.info(f"Disconnected from {account_name}")
+            except Exception as e:
+                logger.error(f"Error disconnecting from {account_name}: {e}")
+            finally:
+                del self.connections[account_name]
+    
+    def disconnect_all(self) -> None:
+        """Disconnect from all IMAP servers."""
+        for account_name in list(self.connections.keys()):
+            self.disconnect(account_name)
+    
+    def ensure_folder_exists(self, client: IMAPClient, folder: str) -> None:
+        """Ensure a folder exists, create it if it doesn't.
+        
+        Args:
+            client: The IMAPClient object
+            folder: The folder name to check/create
+        """
+        folders = [f.decode() if isinstance(f, bytes) else f for f in client.list_folders()]
+        folder_names = [f[2] for f in folders]
+        
+        if folder not in folder_names:
+            logger.info(f"Creating folder: {folder}")
+            client.create_folder(folder)
+    
+    def move_email(self, client: IMAPClient, msg_id: int, target_folder: str) -> bool:
+        """Move an email to a target folder.
+        
+        Args:
+            client: The IMAPClient object
+            msg_id: The message ID to move
+            target_folder: The target folder to move to
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Ensure target folder exists
+            self.ensure_folder_exists(client, target_folder)
+            
+            # Move the message
+            client.move(msg_id, target_folder)
+            logger.info(f"Moved email {msg_id} to {target_folder}")
+            return True
+        except Exception as e:
+            logger.error(f"Error moving email {msg_id} to {target_folder}: {e}")
+            return False
+    
+    def mark_as_read(self, client: IMAPClient, msg_id: int) -> bool:
+        """Mark an email as read.
+        
+        Args:
+            client: The IMAPClient object
+            msg_id: The message ID to mark as read
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            client.add_flags(msg_id, [b'\\Seen'])
+            logger.info(f"Marked email {msg_id} as read")
+            return True
+        except Exception as e:
+            logger.error(f"Error marking email {msg_id} as read: {e}")
+            return False
+    
+    def get_unread_emails(
+        self, client: IMAPClient, folder: str, max_emails: int
+    ) -> Dict[int, Email]:
+        """Get unread emails from a folder.
+        
+        Args:
+            client: The IMAPClient object
+            folder: The folder to fetch emails from
+            max_emails: Maximum number of emails to fetch
+            
+        Returns:
+            Dictionary mapping message IDs to Email objects
+        """
+        try:
+            # Select the folder
+            client.select_folder(folder)
+            logger.info(f"Selected folder: {folder}")
+            
+            # Search for unread emails
+            messages = client.search(['UNSEEN'])
+            logger.info(f"Found {len(messages)} unread emails in {folder}")
+            
+            # Limit the number of emails
+            if max_emails > 0 and len(messages) > max_emails:
+                messages = messages[:max_emails]
+            
+            # Fetch email data
+            if not messages:
+                return {}
+            
+            raw_emails = client.fetch(messages, ['ENVELOPE', 'BODY[]'])
+            
+            # Convert to Email objects
+            emails = {}
+            for msg_id, data in raw_emails.items():
+                try:
+                    message = email.message_from_bytes(data[b'BODY[]'])
+                    emails[msg_id] = Email.from_message(message, msg_id)
+                    emails[msg_id].folder = folder
+                except Exception as e:
+                    logger.error(f"Error processing email {msg_id}: {e}")
+            
+            return emails
+        except Exception as e:
+            logger.error(f"Error fetching emails from {folder}: {e}")
+            return {} 
