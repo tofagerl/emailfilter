@@ -42,7 +42,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Create non-root user and required directories
 RUN groupadd -r emailfilter && \
     useradd -r -g emailfilter emailfilter && \
-    mkdir -p /config /home/emailfilter/logs && \
+    mkdir -p /config /home/emailfilter/logs /home/emailfilter/.emailfilter && \
     chown -R emailfilter:emailfilter /config /home/emailfilter
 
 # Copy wheels and project files from builder stage
@@ -56,6 +56,8 @@ RUN pip install --upgrade pip && \
 
 # Set volume for configuration
 VOLUME /config
+# Set volume for persistent data including SQLite database
+VOLUME /home/emailfilter
 
 # Add metadata
 LABEL version="1.0.0" \
@@ -63,6 +65,8 @@ LABEL version="1.0.0" \
 
 # Set environment variable for logs directory
 ENV EMAILFILTER_LOGS_DIR=/home/emailfilter/logs
+# Set environment variable for state directory
+ENV EMAILFILTER_STATE_DIR=/home/emailfilter/.emailfilter
 
 # Add a healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

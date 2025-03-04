@@ -107,7 +107,7 @@ def reset_state(state_manager, account_name=None):
             logger.info("State database deleted")
         
         # Reinitialize the database
-        state_manager = SQLiteStateManager(db_path)
+        state_manager = SQLiteStateManager()
         logger.info("State database reinitialized")
     
     return state_manager
@@ -116,10 +116,8 @@ def main():
     """Run the test script."""
     args = parse_args()
     
-    # Create a state manager
-    state_dir = os.path.expanduser("~/.emailfilter")
-    os.makedirs(state_dir, exist_ok=True)
-    state_manager = SQLiteStateManager(os.path.join(state_dir, "processed_emails.db"))
+    # Create a state manager with default path
+    state_manager = SQLiteStateManager()
     
     # Perform the requested action
     if args.action == "view":

@@ -14,12 +14,17 @@ logger = logging.getLogger(__name__)
 class SQLiteStateManager:
     """Manages the state of processed emails using SQLite."""
     
-    def __init__(self, db_file_path: str):
+    def __init__(self, db_file_path: str = None):
         """Initialize the state manager.
         
         Args:
-            db_file_path: Path to the SQLite database file
+            db_file_path: Path to the SQLite database file. If None, uses the default path.
         """
+        if db_file_path is None:
+            # Use environment variable if set, otherwise use default path
+            state_dir = os.environ.get('EMAILFILTER_STATE_DIR', os.path.expanduser("~/.emailfilter"))
+            db_file_path = os.path.join(state_dir, "processed_emails.db")
+            
         self.db_file_path = db_file_path
         
         # Create directory for database file if it doesn't exist
@@ -27,6 +32,8 @@ class SQLiteStateManager:
         
         # Initialize database
         self._init_db()
+        
+        logger.info(f"SQLite state manager initialized with database at {self.db_file_path}")
     
     def _init_db(self) -> None:
         """Initialize the SQLite database."""

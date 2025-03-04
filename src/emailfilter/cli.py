@@ -137,10 +137,8 @@ def handle_filter_command(args):
 def handle_state_command(args):
     """Handle the state command."""
     try:
-        # Initialize state manager
-        state_dir = os.path.expanduser("~/.emailfilter")
-        os.makedirs(state_dir, exist_ok=True)
-        state_manager = SQLiteStateManager(os.path.join(state_dir, "processed_emails.db"))
+        # Initialize state manager with default path
+        state_manager = SQLiteStateManager()
         
         if args.action == "view":
             # View state

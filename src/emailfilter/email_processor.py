@@ -33,10 +33,8 @@ class EmailProcessor:
         # Initialize components
         self.config_manager = ConfigManager(config_path)
         
-        # Set up state manager
-        state_dir = os.path.expanduser("~/.emailfilter")
-        os.makedirs(state_dir, exist_ok=True)
-        self.state_manager = SQLiteStateManager(os.path.join(state_dir, "processed_emails.db"))
+        # Set up state manager - use SQLite with default path
+        self.state_manager = SQLiteStateManager()
         
         # Set up IMAP manager
         self.imap_manager = IMAPManager()

@@ -168,6 +168,12 @@ The local state system stores a unique identifier for each processed email in a 
 
 When the application processes emails, it checks this database to determine which emails have already been processed, ensuring that each email is only processed once. The SQLite database provides better performance and data integrity compared to the previous JSON-based approach, especially when dealing with large numbers of emails.
 
+### Docker Persistence
+
+When running in Docker, the SQLite database is stored at `/home/emailfilter/.emailfilter/processed_emails.db` and is automatically persisted through the `emailfilter_data` volume defined in the `docker-compose.yml` file. This ensures that your processed email state is maintained even if the container is restarted or recreated.
+
+The application uses the `EMAILFILTER_STATE_DIR` environment variable to determine where to store the state database. This is set to `/home/emailfilter/.emailfilter` in the Dockerfile.
+
 ### Managing the State
 
 You can manage the local state using the CLI:
