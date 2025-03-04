@@ -3,7 +3,9 @@
 import os
 import logging
 import yaml
+import json
 from enum import Enum, auto
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union, Any
 
 import openai
@@ -17,9 +19,12 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
+# Get logs directory from environment variable or use default
+logs_dir = os.environ.get('EMAILFILTER_LOGS_DIR', 'logs')
+os.makedirs(logs_dir, exist_ok=True)
+
 # Create a file handler for detailed logs
-os.makedirs('logs', exist_ok=True)
-file_handler = logging.FileHandler('logs/openai_interactions.log')
+file_handler = logging.FileHandler(os.path.join(logs_dir, 'openai_interactions.log'))
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
@@ -83,39 +88,25 @@ def log_openai_interaction(email: Dict[str, str], prompt: str, response: str, ca
     Log OpenAI API interaction to a file.
     
     Args:
-        email: Email dictionary with keys like 'subject', 'from', 'body', etc.
+        email: The email data
         prompt: The prompt sent to OpenAI
-        response: The response received from OpenAI
-        category_result: The category result (as string)
+        response: The response from OpenAI
+        category_result: The category result
     """
     try:
-        # Log to the application logger
-        logger.info(f"OpenAI categorized email '{email.get('subject', 'No Subject')}' as: {category_result}")
+        # Create a log entry
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "email_subject": email.get("subject", ""),
+            "email_from": email.get("from", ""),
+            "prompt_sent": prompt,
+            "response_received": response,
+            "category_result": category_result
+        }
         
-        # Create a more detailed log entry in a separate file
-        with open('logs/detailed_openai_logs.jsonl', 'a') as f:
-            import json
-            from datetime import datetime
-            
-            log_entry = {
-                'timestamp': datetime.utcnow().isoformat(),
-                'email_from': email.get('from', ''),
-                'email_to': email.get('to', ''),
-                'email_subject': email.get('subject', ''),
-                'email_date': email.get('date', ''),
-                'prompt_sent': prompt,
-                'response_received': response,
-                'category_result': category_result
-            }
-            
-            # Don't log the full email body to avoid storing sensitive information
-            # Just log a truncated version for context
-            body = email.get('body', '')
-            if body:
-                log_entry['email_body_preview'] = body[:200] + ('...' if len(body) > 200 else '')
-            
-            f.write(json.dumps(log_entry) + '\n')
-            
+        # Write to a JSONL file
+        with open(os.path.join(logs_dir, 'detailed_openai_logs.jsonl'), 'a') as f:
+            f.write(json.dumps(log_entry) + "\n")
     except Exception as e:
         logger.error(f"Error logging OpenAI interaction: {e}")
 
@@ -484,54 +475,44 @@ def categorize_and_filter_with_custom_categories(
 
 def cleanup_old_logs(max_age_days: int = 7) -> int:
     """
-    Clean up old log files.
+    Clean up old log entries.
     
     Args:
-        max_age_days: Maximum age of log files in days
+        max_age_days: Maximum age of log entries in days
         
     Returns:
-        int: Number of deleted log entries
+        Number of deleted log entries
     """
     try:
-        import os
-        import time
-        from datetime import datetime, timedelta
+        log_file = os.path.join(logs_dir, 'detailed_openai_logs.jsonl')
         
-        log_file = 'logs/detailed_openai_logs.jsonl'
         if not os.path.exists(log_file):
+            logger.info(f"Log file not found: {log_file}")
             return 0
         
-        # Get the current time
-        now = datetime.utcnow()
-        cutoff_date = now - timedelta(days=max_age_days)
-        cutoff_timestamp = cutoff_date.isoformat()
+        # Calculate cutoff date
+        cutoff_date = datetime.now() - timedelta(days=max_age_days)
         
-        # Read the log file and filter out old entries
-        import json
+        # Read existing logs
         with open(log_file, 'r') as f:
-            lines = f.readlines()
+            logs = [json.loads(line) for line in f if line.strip()]
         
-        new_lines = []
-        deleted_count = 0
+        # Filter logs by date
+        old_count = len(logs)
+        logs = [
+            log for log in logs 
+            if datetime.fromisoformat(log.get("timestamp", "2000-01-01")) > cutoff_date
+        ]
+        new_count = len(logs)
+        deleted_count = old_count - new_count
         
-        for line in lines:
-            try:
-                entry = json.loads(line)
-                if entry.get('timestamp', '') >= cutoff_timestamp:
-                    new_lines.append(line)
-                else:
-                    deleted_count += 1
-            except json.JSONDecodeError:
-                # Keep lines that can't be parsed as JSON
-                new_lines.append(line)
-        
-        # Write the filtered entries back to the file
+        # Write back filtered logs
         with open(log_file, 'w') as f:
-            f.writelines(new_lines)
+            for log in logs:
+                f.write(json.dumps(log) + "\n")
         
-        logger.info(f"Cleaned up {deleted_count} old log entries")
+        logger.info(f"Cleaned up {deleted_count} log entries older than {max_age_days} days")
         return deleted_count
-    
     except Exception as e:
-        logger.error(f"Error cleaning up old logs: {e}")
+        logger.error(f"Error cleaning up logs: {e}")
         return 0 

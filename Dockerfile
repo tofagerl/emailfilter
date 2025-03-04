@@ -39,10 +39,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=UTC
 
-# Create non-root user
+# Create non-root user and required directories
 RUN groupadd -r emailfilter && \
     useradd -r -g emailfilter emailfilter && \
-    mkdir -p /config /home/emailfilter && \
+    mkdir -p /config /home/emailfilter/logs && \
     chown -R emailfilter:emailfilter /config /home/emailfilter
 
 # Copy wheels and project files from builder stage
@@ -61,6 +61,9 @@ VOLUME /config
 LABEL version="1.0.0" \
       description="Email filtering and categorization tool"
 
+# Set environment variable for logs directory
+ENV EMAILFILTER_LOGS_DIR=/home/emailfilter/logs
+
 # Add a healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD emailfilter --version || exit 1
@@ -72,4 +75,4 @@ USER emailfilter
 ENTRYPOINT ["emailfilter"]
 
 # Default command (can be overridden)
-CMD ["daemon", "--config", "/config/config.yaml"] 
+CMD ["imap", "--config", "/config/config.yaml", "--daemon"] 
