@@ -88,7 +88,7 @@ def parse_args() -> argparse.Namespace:
         help="Path to output categorized emails (default: stdout)"
     )
     categorize_parser.add_argument(
-        "--category", "-c",
+        "--category", "-cat",
         type=str,
         choices=["spam", "receipts", "promotions", "updates", "inbox", "all"],
         default="all",
