@@ -93,6 +93,13 @@ class EmailProcessor:
         
         # Load processed emails state
         self._load_processed_state()
+        
+        # Load OpenAI API key from config
+        try:
+            categorizer.load_api_key(self.config_path)
+        except ValueError as e:
+            logger.error(f"Error loading OpenAI API key: {e}")
+            raise
 
     def _load_config(self) -> None:
         """Load configuration from YAML file."""
