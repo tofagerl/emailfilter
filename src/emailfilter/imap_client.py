@@ -10,8 +10,6 @@ import signal
 import sys
 import threading
 import time
-import json
-import hashlib
 from datetime import datetime, timedelta
 from email.message import Message
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -20,6 +18,8 @@ import yaml
 from imapclient import IMAPClient
 
 from emailfilter import categorizer
+from .sqlite_state_manager import SQLiteStateManager
+from .models import Email as EmailModel
 
 # Configure logging
 logging.basicConfig(
@@ -82,17 +82,14 @@ class EmailProcessor:
         self.config_path = config_path
         self.accounts = []
         self.options = {}
-        self.processed_state = {}
-        self.state_file_path = os.path.expanduser("~/.emailfilter/processed_emails.json")
         
-        # Create directory for state file if it doesn't exist
-        os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
+        # Set up SQLite state manager
+        state_dir = os.path.expanduser("~/.emailfilter")
+        os.makedirs(state_dir, exist_ok=True)
+        self.state_manager = SQLiteStateManager(os.path.join(state_dir, "processed_emails.db"))
         
         # Load configuration
         self._load_config()
-        
-        # Load processed emails state
-        self._load_processed_state()
         
         # Load OpenAI API key from config
         try:
@@ -128,98 +125,6 @@ class EmailProcessor:
             logger.error(f"Error loading configuration: {e}")
             raise
 
-    def _load_processed_state(self) -> None:
-        """Load processed emails state from JSON file."""
-        try:
-            if os.path.exists(self.state_file_path):
-                with open(self.state_file_path, "r") as f:
-                    self.processed_state = json.load(f)
-                logger.info(f"Loaded processed state with {sum(len(ids) for ids in self.processed_state.values())} emails")
-            else:
-                self.processed_state = {}
-                logger.info("No existing processed state found, starting fresh")
-        except Exception as e:
-            logger.error(f"Error loading processed state: {e}")
-            self.processed_state = {}
-
-    def _save_processed_state(self) -> None:
-        """Save processed emails state to JSON file."""
-        try:
-            with open(self.state_file_path, "w") as f:
-                json.dump(self.processed_state, f)
-            logger.info(f"Saved processed state with {sum(len(ids) for ids in self.processed_state.values())} emails")
-        except Exception as e:
-            logger.error(f"Error saving processed state: {e}")
-
-    def _generate_email_id(self, account_name: str, msg_id: int, email_data: Dict[str, Any]) -> str:
-        """Generate a unique ID for an email.
-        
-        Args:
-            account_name: Name of the email account
-            msg_id: IMAP message ID
-            email_data: Email data dictionary
-            
-        Returns:
-            A unique string ID for the email
-        """
-        # Create a unique identifier using account, message ID, and email metadata
-        unique_str = f"{account_name}:{msg_id}:{email_data.get('from', '')}:{email_data.get('subject', '')}:{email_data.get('date', '')}"
-        return hashlib.md5(unique_str.encode()).hexdigest()
-
-    def _is_email_processed(self, account_name: str, msg_id: int, email_data: Dict[str, Any]) -> bool:
-        """Check if an email has been processed.
-        
-        Args:
-            account_name: Name of the email account
-            msg_id: IMAP message ID
-            email_data: Email data dictionary
-            
-        Returns:
-            True if the email has been processed, False otherwise
-        """
-        email_id = self._generate_email_id(account_name, msg_id, email_data)
-        return account_name in self.processed_state and email_id in self.processed_state[account_name]
-
-    def _mark_email_as_processed(self, account_name: str, msg_id: int, email_data: Dict[str, Any]) -> None:
-        """Mark an email as processed in the local state.
-        
-        Args:
-            account_name: Name of the email account
-            msg_id: IMAP message ID
-            email_data: Email data dictionary
-        """
-        email_id = self._generate_email_id(account_name, msg_id, email_data)
-        
-        # Initialize account in state if not exists
-        if account_name not in self.processed_state:
-            self.processed_state[account_name] = []
-            
-        # Add email ID to processed state
-        self.processed_state[account_name].append(email_id)
-        
-        # Save state after each update
-        self._save_processed_state()
-
-    def _cleanup_processed_state(self, max_age_days: int = 30) -> None:
-        """Clean up old entries from the processed state.
-        
-        Args:
-            max_age_days: Maximum age of entries in days
-        """
-        # Not implemented in this version since we're using a simple list
-        # In a more advanced implementation, we would store timestamps with each entry
-        # and remove entries older than max_age_days
-        
-        # For now, just limit the size of each account's list
-        max_entries = 10000  # Adjust as needed
-        for account_name in self.processed_state:
-            if len(self.processed_state[account_name]) > max_entries:
-                # Keep only the most recent entries
-                self.processed_state[account_name] = self.processed_state[account_name][-max_entries:]
-        
-        # Save the cleaned up state
-        self._save_processed_state()
-
     def connect_to_account(self, account: EmailAccount) -> Optional[IMAPClient]:
         """Connect to an IMAP account.
 
@@ -239,336 +144,214 @@ class EmailProcessor:
             logger.error(f"Error connecting to {account}: {e}")
             return None
 
-    def get_unprocessed_emails(
-        self, client: IMAPClient, folder: str, max_emails: int, account_name: str
-    ) -> Dict[int, Dict[str, Any]]:
-        """Get unprocessed emails from a folder.
-
+    def fetch_unprocessed_emails(self, account: EmailAccount, max_emails: int = 100) -> Dict[int, Dict[str, Any]]:
+        """Fetch unprocessed emails from an account.
+        
         Args:
-            client: The IMAPClient object
-            folder: The folder to fetch emails from
+            account: The email account to fetch from
             max_emails: Maximum number of emails to fetch
-            account_name: Name of the email account
-
+            
         Returns:
-            Dictionary mapping message IDs to email data
+            Dictionary of email data keyed by message ID
         """
-        try:
-            client.select_folder(folder)
-            
-            # Search for all emails
-            messages = client.search(["ALL"])
-            
-            # Limit the number of messages
-            messages = messages[:max_emails]
-            
-            if not messages:
-                logger.info(f"No emails found in {folder}")
-                return {}
-            
-            logger.info(f"Found {len(messages)} emails in {folder}")
-            
-            # Fetch email data
-            email_data = {}
-            for msg_id, data in client.fetch(messages, ["ENVELOPE", "RFC822"]).items():
-                try:
-                    raw_message = data[b"RFC822"]
-                    parsed_email = email.message_from_bytes(raw_message)
-                    
-                    # Extract email parts
-                    subject = self._decode_header(parsed_email["Subject"] or "")
-                    from_addr = self._decode_header(parsed_email["From"] or "")
-                    to_addr = self._decode_header(parsed_email["To"] or "")
-                    date = parsed_email["Date"] or ""
-                    body = self._get_email_body(parsed_email)
-                    
-                    email_info = {
-                        "subject": subject,
-                        "from": from_addr,
-                        "to": to_addr,
-                        "date": date,
-                        "body": body,
-                        "raw_message": raw_message,
-                    }
-                    
-                    # Check if this email has been processed before
-                    if not self._is_email_processed(account_name, msg_id, email_info):
-                        email_data[msg_id] = email_info
-                except Exception as e:
-                    logger.error(f"Error processing message {msg_id}: {e}")
-            
-            logger.info(f"Found {len(email_data)} unprocessed emails in {folder}")
-            return email_data
-        except Exception as e:
-            logger.error(f"Error fetching emails from {folder}: {e}")
+        client = self.connect_to_account(account)
+        if not client:
             return {}
-
-    def _decode_header(self, header: str) -> str:
-        """Decode an email header.
-
-        Args:
-            header: The header to decode
-
-        Returns:
-            Decoded header string
-        """
-        if not header:
-            return ""
+        
+        email_data = {}
+        account_name = account.name
         
         try:
-            decoded_header = ""
-            for part, encoding in email.header.decode_header(header):
-                if isinstance(part, bytes):
-                    if encoding:
-                        try:
-                            decoded_header += part.decode(encoding)
-                        except (LookupError, UnicodeDecodeError):
-                            decoded_header += part.decode("utf-8", errors="replace")
-                    else:
-                        decoded_header += part.decode("utf-8", errors="replace")
-                else:
-                    decoded_header += part
-            return decoded_header
-        except Exception as e:
-            logger.error(f"Error decoding header: {e}")
-            return header
-
-    def _get_email_body(self, message: Message) -> str:
-        """Extract the body from an email message.
-
-        Args:
-            message: The email message
-
-        Returns:
-            The email body as text
-        """
-        if message.is_multipart():
-            # Get the plaintext body from a multipart message
-            text_parts = []
-            for part in message.walk():
-                content_type = part.get_content_type()
-                content_disposition = str(part.get("Content-Disposition"))
+            # Process each folder
+            for folder in account.folders:
+                if len(email_data) >= max_emails:
+                    break
                 
-                # Skip attachments
-                if "attachment" in content_disposition:
-                    continue
-                
-                # Get text parts
-                if content_type == "text/plain":
-                    try:
-                        charset = part.get_content_charset() or "utf-8"
-                        payload = part.get_payload(decode=True)
-                        if payload:
-                            text_parts.append(payload.decode(charset, errors="replace"))
-                    except Exception as e:
-                        logger.error(f"Error extracting text part: {e}")
-            
-            return "\n".join(text_parts)
-        else:
-            # Get the body from a single-part message
-            try:
-                charset = message.get_content_charset() or "utf-8"
-                payload = message.get_payload(decode=True)
-                if payload:
-                    return payload.decode(charset, errors="replace")
-                return ""
-            except Exception as e:
-                logger.error(f"Error extracting message body: {e}")
-                return ""
-
-    def categorize_emails(
-        self,
-        client: IMAPClient,
-        email_ids: List[int],
-        emails: Dict[int, Dict[str, Any]],
-        batch_size: int = 10,
-    ) -> Dict[int, Tuple[Dict[str, Any], categorizer.EmailCategory]]:
-        """Categorize emails using the OpenAI API.
-
-        Args:
-            client: The IMAPClient object
-            email_ids: List of message IDs to categorize
-            emails: Dictionary mapping message IDs to email data
-            batch_size: Number of emails to process in each batch
-
-        Returns:
-            Dictionary mapping message IDs to tuples of (email data, category)
-        """
-        categorized_emails = {}
-        
-        # Process emails in batches
-        for i in range(0, len(email_ids), batch_size):
-            batch_ids = email_ids[i:i + batch_size]
-            logger.info(f"Categorizing batch of {len(batch_ids)} emails")
-            
-            for msg_id in batch_ids:
                 try:
-                    email_data = emails[msg_id]
+                    # Select the folder
+                    client.select_folder(folder)
+                    logger.info(f"Selected folder: {folder}")
                     
-                    # Extract relevant fields for categorization
-                    email_for_categorization = {
-                        "subject": email_data["subject"],
-                        "from": email_data["from"],
-                        "to": email_data["to"],
-                        "date": email_data["date"],
-                        "body": email_data["body"],
-                    }
+                    # Search for all emails in the folder
+                    messages = client.search("ALL")
+                    logger.info(f"Found {len(messages)} messages in {folder}")
                     
-                    # Categorize the email
-                    category = categorizer.categorize_email(email_for_categorization)
-                    categorized_emails[msg_id] = (email_data, category)
+                    # Limit the number of messages to process
+                    messages = messages[-max_emails:]
                     
-                    logger.info(f"Categorized email as {category}: {email_data['subject']}")
+                    # Fetch email data
+                    for msg_id in messages:
+                        if len(email_data) >= max_emails:
+                            break
+                        
+                        try:
+                            # Fetch email data
+                            raw_data = client.fetch([msg_id], ["ENVELOPE", "RFC822"])
+                            if not raw_data or msg_id not in raw_data:
+                                continue
+                            
+                            # Parse email
+                            raw_message = raw_data[msg_id][b"RFC822"]
+                            message = email.message_from_bytes(raw_message)
+                            
+                            # Extract email info
+                            email_info = self._extract_email_info(message)
+                            email_info["folder"] = folder
+                            
+                            # Create an Email model object for state checking
+                            email_model = EmailModel(
+                                subject=email_info.get("subject", ""),
+                                from_addr=email_info.get("from", ""),
+                                to_addr=email_info.get("to", ""),
+                                date=email_info.get("date", ""),
+                                body=email_info.get("body", ""),
+                                raw_message=raw_message,
+                                msg_id=msg_id,
+                                folder=folder
+                            )
+                            
+                            # Check if this email has been processed before
+                            if not self.state_manager.is_email_processed(account_name, email_model):
+                                email_data[msg_id] = email_info
+                        except Exception as e:
+                            logger.error(f"Error processing message {msg_id}: {e}")
                 except Exception as e:
-                    logger.error(f"Error categorizing email: {e}")
-            
-            # Add a small delay between batches to avoid rate limits
-            if i + batch_size < len(email_ids):
-                time.sleep(1)
+                    logger.error(f"Error processing folder {folder}: {e}")
+        finally:
+            client.logout()
         
-        return categorized_emails
-
-    def _ensure_folder_exists(self, client: IMAPClient, folder: str) -> None:
-        """Ensure a folder exists, create it if it doesn't.
-        
-        Args:
-            client: The IMAPClient object
-            folder: The folder name to check/create
-        """
-        folders = [f.decode() if isinstance(f, bytes) else f for f in client.list_folders()]
-        folder_names = [f[2] for f in folders]
-        
-        if folder not in folder_names:
-            logger.info(f"Creating folder: {folder}")
-            client.create_folder(folder)
+        logger.info(f"Fetched {len(email_data)} unprocessed emails from {account}")
+        return email_data
 
     def process_categorized_emails(
-        self,
-        client: IMAPClient,
-        categorized_emails: Dict[int, Tuple[Dict[str, Any], categorizer.EmailCategory]],
-        current_folder: str = None,
-        account_name: str = None,
-    ) -> Dict[categorizer.EmailCategory, int]:
-        """Process categorized emails (move to folders, mark as read, etc.).
-
+        self, 
+        client: IMAPClient, 
+        account_name: str, 
+        categorized_emails: Dict[str, List[Dict[str, Any]]], 
+        category_folders: Dict[str, str],
+        move_emails: bool = True
+    ) -> Dict[str, int]:
+        """Process categorized emails.
+        
         Args:
-            client: The IMAPClient object
-            categorized_emails: Dictionary mapping message IDs to tuples of (email data, category)
-            current_folder: The current folder being processed
+            client: The IMAP client
             account_name: Name of the email account
-
-        Returns:
-            Dictionary mapping categories to counts of processed emails
-        """
-        category_counts = {category: 0 for category in categorizer.EmailCategory}
-        
-        # Get folder mapping from config
-        category_folders = self.options.get("category_folders", {})
-        default_folders = {
-            "spam": "[Spam]",
-            "receipts": "[Receipts]",
-            "promotions": "[Promotions]",
-            "updates": "[Updates]",
-            "inbox": "INBOX",
-        }
-        
-        # Merge with defaults
-        for category, folder in default_folders.items():
-            if category not in category_folders:
-                category_folders[category] = folder
-        
-        # Process each email
-        for msg_id, (email_data, category) in categorized_emails.items():
-            try:
-                # Mark as processed in local state
-                if account_name:
-                    self._mark_email_as_processed(account_name, msg_id, email_data)
-                
-                # Move to appropriate folder if configured
-                if self.options.get("move_emails", True):
-                    category_name = category.name.lower()
-                    target_folder = category_folders.get(category_name)
-                    
-                    if target_folder and (current_folder is None or target_folder != current_folder):
-                        # Ensure target folder exists
-                        self._ensure_folder_exists(client, target_folder)
-                        
-                        # Move the message
-                        client.move(msg_id, target_folder)
-                        logger.info(f"Moved email to {target_folder}")
-                
-                category_counts[category] += 1
-            except Exception as e:
-                logger.error(f"Error processing email {msg_id}: {e}")
-        
-        return category_counts
-
-    def process_account(self, account: EmailAccount) -> Dict[str, Dict[categorizer.EmailCategory, int]]:
-        """Process all unprocessed emails in an account.
-
-        Args:
-            account: The EmailAccount to process
-
-        Returns:
-            Dictionary mapping folders to category counts
-        """
-        results = {}
-        client = self.connect_to_account(account)
-        
-        if not client:
-            return results
-        
-        try:
-            max_emails = self.options.get("max_emails_per_run", 100)
+            categorized_emails: Dictionary of emails categorized by category
+            category_folders: Dictionary mapping categories to folder names
+            move_emails: Whether to move emails to category folders
             
-            for folder in account.folders:
-                logger.info(f"Processing folder: {folder}")
-                
-                # Get unprocessed emails
-                emails = self.get_unprocessed_emails(client, folder, max_emails, account.name)
-                
-                if not emails:
+        Returns:
+            Dictionary of counts by category
+        """
+        results = {category: 0 for category in categorized_emails}
+        
+        for category, emails in categorized_emails.items():
+            for email_data in emails:
+                msg_id = email_data.get("msg_id")
+                if not msg_id:
                     continue
                 
-                # Categorize emails
-                email_ids = list(emails.keys())
-                categorized_emails = self.categorize_emails(
-                    client, email_ids, emails, self.options.get("batch_size", 10)
+                # Create an Email model object for state management
+                email_model = EmailModel(
+                    subject=email_data.get("subject", ""),
+                    from_addr=email_data.get("from", ""),
+                    to_addr=email_data.get("to", ""),
+                    date=email_data.get("date", ""),
+                    body=email_data.get("body", ""),
+                    raw_message=b"",  # We don't need the raw message for marking as processed
+                    msg_id=msg_id,
+                    folder=email_data.get("folder", "")
                 )
                 
-                # Process categorized emails
-                category_counts = self.process_categorized_emails(
-                    client, categorized_emails, folder, account.name
-                )
+                # Mark as processed in local state
+                if account_name:
+                    self.state_manager.mark_email_as_processed(account_name, email_model)
                 
-                results[folder] = category_counts
-            
-            # Clean up old entries from the processed state
-            self._cleanup_processed_state()
-            
-            client.logout()
-            logger.info(f"Logged out from {account}")
-            
-            return results
-        except Exception as e:
-            logger.error(f"Error processing account {account}: {e}")
-            try:
-                client.logout()
-            except:
-                pass
-            return results
+                # Move to appropriate folder if configured
+                if move_emails and category in category_folders:
+                    target_folder = category_folders[category]
+                    current_folder = email_data.get("folder", "")
+                    
+                    # Only move if the target folder is different from the current folder
+                    if target_folder and target_folder != current_folder:
+                        try:
+                            # Select the current folder
+                            client.select_folder(current_folder)
+                            
+                            # Move the email
+                            client.copy([msg_id], target_folder)
+                            client.delete_messages([msg_id])
+                            client.expunge()
+                            
+                            logger.info(f"Moved email {msg_id} from {current_folder} to {target_folder}")
+                        except Exception as e:
+                            logger.error(f"Error moving email {msg_id} to {target_folder}: {e}")
+                
+                results[category] += 1
+        
+        return results
 
-    def process_all_accounts(self) -> Dict[str, Dict[str, Dict[categorizer.EmailCategory, int]]]:
-        """Process all accounts.
-
+    def process_emails_once(self) -> Dict[str, Dict[str, Dict[str, int]]]:
+        """Process emails once from all accounts.
+        
         Returns:
-            Dictionary mapping account names to results
+            Dictionary of results by account and category
         """
         results = {}
         
         for account in self.accounts:
-            logger.info(f"Processing account: {account}")
-            results[account.name] = self.process_account(account)
+            account_name = account.name
+            results[account_name] = {}
+            
+            # Connect to the account
+            client = self.connect_to_account(account)
+            if not client:
+                continue
+            
+            try:
+                # Fetch unprocessed emails
+                max_emails = self.options.get("max_emails_per_run", 100)
+                emails = self.fetch_unprocessed_emails(account, max_emails)
+                
+                if not emails:
+                    logger.info(f"No new emails to process for {account}")
+                    continue
+                
+                logger.info(f"Processing {len(emails)} emails for {account}")
+                
+                # Convert to list format for categorizer
+                email_list = []
+                for msg_id, email_data in emails.items():
+                    email_data["msg_id"] = msg_id
+                    email_list.append(email_data)
+                
+                # Categorize emails
+                batch_size = self.options.get("batch_size", 10)
+                categorized = categorizer.categorize_and_filter(email_list, batch_size)
+                
+                # Process categorized emails
+                category_folders = self.options.get("category_folders", {})
+                move_emails = self.options.get("move_emails", True)
+                
+                # Reconnect to ensure the connection is fresh
+                client = self.connect_to_account(account)
+                if not client:
+                    continue
+                
+                results[account_name]["categories"] = self.process_categorized_emails(
+                    client, account_name, categorized, category_folders, move_emails
+                )
+                
+                # Clean up old entries from the processed state
+                self.state_manager.cleanup_old_entries()
+                
+                # Logout
+                client.logout()
+                
+            except Exception as e:
+                logger.error(f"Error processing emails for {account}: {e}")
+                if client:
+                    client.logout()
         
         return results
 
@@ -638,17 +421,17 @@ class EmailProcessor:
                         
                         # Initial processing of existing emails
                         max_emails = self.options.get("max_emails_per_run", 100)
-                        emails = self.get_unprocessed_emails(client, folder, max_emails, account.name)
+                        emails = self.fetch_unprocessed_emails(account, max_emails)
                         
                         if emails:
                             # Categorize emails
                             email_ids = list(emails.keys())
-                            categorized_emails = self.categorize_emails(
-                                client, email_ids, emails, self.options.get("batch_size", 10)
+                            categorized_emails = self.process_categorized_emails(
+                                client, account.name, emails, self.options.get("category_folders", {}), self.options.get("move_emails", True)
                             )
                             
                             # Process categorized emails
-                            self.process_categorized_emails(client, categorized_emails, folder, account.name)
+                            self.process_categorized_emails(client, account.name, categorized_emails, self.options.get("category_folders", {}), self.options.get("move_emails", True))
                         
                         # Start IDLE mode with shorter timeouts for better error detection
                         logger.info(f"Entering IDLE mode for {folder}")
@@ -671,17 +454,17 @@ class EmailProcessor:
                                     logger.info(f"Received new emails in {folder}")
                                     
                                     # Process new emails
-                                    emails = self.get_unprocessed_emails(client, folder, max_emails, account.name)
+                                    emails = self.fetch_unprocessed_emails(account, max_emails)
                                     
                                     if emails:
                                         # Categorize emails
                                         email_ids = list(emails.keys())
-                                        categorized_emails = self.categorize_emails(
-                                            client, email_ids, emails, self.options.get("batch_size", 10)
+                                        categorized_emails = self.process_categorized_emails(
+                                            client, account.name, emails, self.options.get("category_folders", {}), self.options.get("move_emails", True)
                                         )
                                         
                                         # Process categorized emails
-                                        self.process_categorized_emails(client, categorized_emails, folder, account.name)
+                                        self.process_categorized_emails(client, account.name, categorized_emails, self.options.get("category_folders", {}), self.options.get("move_emails", True))
                                 
                                 # Check if we should stop
                                 if not running:
@@ -701,7 +484,7 @@ class EmailProcessor:
                         break
                 
                 # Clean up old entries from the processed state
-                self._cleanup_processed_state()
+                self.state_manager.cleanup_old_entries()
                 
                 # Logout
                 try:
@@ -721,6 +504,126 @@ class EmailProcessor:
         
         logger.info(f"Stopped monitoring for {account}")
 
+    def _extract_email_info(self, message: Message) -> Dict[str, Any]:
+        """Extract information from an email message.
+        
+        Args:
+            message: The email message
+            
+        Returns:
+            Dictionary containing email information
+        """
+        # Extract subject
+        subject = ""
+        if message["Subject"]:
+            try:
+                decoded_header = email.header.decode_header(message["Subject"])
+                subject_parts = []
+                for part, encoding in decoded_header:
+                    if isinstance(part, bytes):
+                        if encoding:
+                            try:
+                                subject_parts.append(part.decode(encoding))
+                            except (LookupError, UnicodeDecodeError):
+                                subject_parts.append(part.decode("utf-8", errors="replace"))
+                        else:
+                            subject_parts.append(part.decode("utf-8", errors="replace"))
+                    else:
+                        subject_parts.append(part)
+                subject = "".join(subject_parts)
+            except Exception as e:
+                logger.error(f"Error decoding subject: {e}")
+                subject = message["Subject"]
+        
+        # Extract from address
+        from_addr = ""
+        if message["From"]:
+            try:
+                decoded_header = email.header.decode_header(message["From"])
+                from_parts = []
+                for part, encoding in decoded_header:
+                    if isinstance(part, bytes):
+                        if encoding:
+                            try:
+                                from_parts.append(part.decode(encoding))
+                            except (LookupError, UnicodeDecodeError):
+                                from_parts.append(part.decode("utf-8", errors="replace"))
+                        else:
+                            from_parts.append(part.decode("utf-8", errors="replace"))
+                    else:
+                        from_parts.append(part)
+                from_addr = "".join(from_parts)
+            except Exception as e:
+                logger.error(f"Error decoding from address: {e}")
+                from_addr = message["From"]
+        
+        # Extract to address
+        to_addr = ""
+        if message["To"]:
+            try:
+                decoded_header = email.header.decode_header(message["To"])
+                to_parts = []
+                for part, encoding in decoded_header:
+                    if isinstance(part, bytes):
+                        if encoding:
+                            try:
+                                to_parts.append(part.decode(encoding))
+                            except (LookupError, UnicodeDecodeError):
+                                to_parts.append(part.decode("utf-8", errors="replace"))
+                        else:
+                            to_parts.append(part.decode("utf-8", errors="replace"))
+                    else:
+                        to_parts.append(part)
+                to_addr = "".join(to_parts)
+            except Exception as e:
+                logger.error(f"Error decoding to address: {e}")
+                to_addr = message["To"]
+        
+        # Extract date
+        date = message["Date"] or ""
+        
+        # Extract body
+        body = ""
+        if message.is_multipart():
+            # Get the plaintext body from a multipart message
+            text_parts = []
+            for part in message.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition"))
+                
+                # Skip attachments
+                if "attachment" in content_disposition:
+                    continue
+                
+                # Get text parts
+                if content_type == "text/plain":
+                    try:
+                        charset = part.get_content_charset() or "utf-8"
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            text_parts.append(payload.decode(charset, errors="replace"))
+                    except Exception as e:
+                        logger.error(f"Error extracting text part: {e}")
+            
+            body = "\n".join(text_parts)
+        else:
+            # Get the body from a single-part message
+            try:
+                charset = message.get_content_charset() or "utf-8"
+                payload = message.get_payload(decode=True)
+                if payload:
+                    body = payload.decode(charset, errors="replace")
+            except Exception as e:
+                logger.error(f"Error extracting message body: {e}")
+        
+        return {
+            "subject": subject,
+            "from": from_addr,
+            "to": to_addr,
+            "date": date,
+            "body": body
+        }
+
 
 def main(config_path: str, daemon_mode: bool = False) -> None:
     """Main entry point for the IMAP email processor.
@@ -736,7 +639,7 @@ def main(config_path: str, daemon_mode: bool = False) -> None:
         processor.start_monitoring()
     else:
         # One-time processing mode
-        results = processor.process_all_accounts()
+        results = processor.process_emails_once()
         
         # Print summary
         print("\nEmail Processing Summary:")
@@ -745,17 +648,10 @@ def main(config_path: str, daemon_mode: bool = False) -> None:
         for account_name, account_results in results.items():
             print(f"\nAccount: {account_name}")
             
-            for folder, category_counts in account_results.items():
-                print(f"  Folder: {folder}")
-                
-                total = sum(category_counts.values())
-                if total == 0:
-                    print("    No emails processed")
-                    continue
-                
-                for category, count in category_counts.items():
-                    if count > 0:
-                        print(f"    {category}: {count} emails")
+            for category, count in account_results["categories"].items():
+                if count > 0:
+                    print(f"  Category: {category}")
+                    print(f"    Count: {count}")
         
         print("\nProcessing complete!")
 

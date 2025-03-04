@@ -13,7 +13,7 @@ from imapclient import IMAPClient
 from emailfilter import categorizer
 from .models import Email, EmailAccount, ProcessingOptions
 from .config_manager import ConfigManager
-from .state_manager import EmailStateManager
+from .sqlite_state_manager import SQLiteStateManager
 from .imap_manager import IMAPManager
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class EmailProcessor:
         # Set up state manager
         state_dir = os.path.expanduser("~/.emailfilter")
         os.makedirs(state_dir, exist_ok=True)
-        self.state_manager = EmailStateManager(os.path.join(state_dir, "processed_emails.json"))
+        self.state_manager = SQLiteStateManager(os.path.join(state_dir, "processed_emails.db"))
         
         # Set up IMAP manager
         self.imap_manager = IMAPManager()

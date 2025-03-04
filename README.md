@@ -160,12 +160,13 @@ The application uses a local state system to track which emails have been proces
 - **Persistent**: The state is maintained between application restarts
 - **Portable**: The state can be backed up and restored easily
 - **Manageable**: You can view, clean, and reset the state as needed
+- **Scalable**: Uses SQLite database for efficient storage and retrieval
 
 ### How It Works
 
-The local state system stores a unique identifier for each processed email in a JSON file located at `~/.emailfilter/processed_emails.json`. This identifier is generated based on the email's account, message ID, sender, subject, and date.
+The local state system stores a unique identifier for each processed email in a SQLite database located at `~/.emailfilter/processed_emails.db`. This identifier is generated based on the email's account, message ID, sender, subject, and date.
 
-When the application processes emails, it checks this state file to determine which emails have already been processed, ensuring that each email is only processed once.
+When the application processes emails, it checks this database to determine which emails have already been processed, ensuring that each email is only processed once. The SQLite database provides better performance and data integrity compared to the previous JSON-based approach, especially when dealing with large numbers of emails.
 
 ### Managing the State
 
@@ -178,7 +179,7 @@ python -m emailfilter.cli state view
 # View state for a specific account
 python -m emailfilter.cli state view --account "Personal Gmail"
 
-# Clean up the state (removes excess entries)
+# Clean up the state (removes entries older than 30 days)
 python -m emailfilter.cli state clean
 
 # Reset the state for all accounts (will cause all emails to be reprocessed)

@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from emailfilter import categorizer
 from emailfilter.email_processor import main as email_processor_main
 from emailfilter.models import Email
+from emailfilter.sqlite_state_manager import SQLiteStateManager
 
 # Configure logging
 logging.basicConfig(
@@ -133,6 +134,60 @@ def handle_filter_command(args):
         sys.exit(1)
 
 
+def handle_state_command(args):
+    """Handle the state command."""
+    try:
+        # Initialize state manager
+        state_dir = os.path.expanduser("~/.emailfilter")
+        os.makedirs(state_dir, exist_ok=True)
+        state_manager = SQLiteStateManager(os.path.join(state_dir, "processed_emails.db"))
+        
+        if args.action == "view":
+            # View state
+            if args.account:
+                count = state_manager.get_processed_count(args.account)
+                logger.info(f"Account '{args.account}' has {count} processed emails")
+            else:
+                accounts = state_manager.get_accounts()
+                logger.info(f"Found {len(accounts)} accounts in the state database")
+                for account in accounts:
+                    count = state_manager.get_processed_count(account)
+                    logger.info(f"Account '{account}' has {count} processed emails")
+                
+                total = state_manager.get_processed_count()
+                logger.info(f"Total processed emails: {total}")
+        
+        elif args.action == "clean":
+            # Clean state
+            state_manager.cleanup_old_entries(args.max_age_days)
+            logger.info(f"Cleaned up state entries older than {args.max_age_days} days")
+        
+        elif args.action == "reset":
+            # Reset state by recreating the database
+            if args.account:
+                logger.warning(f"This will reset the state for account '{args.account}'. All emails will be reprocessed.")
+                if args.force or input("Are you sure? (y/n): ").lower() == "y":
+                    # Delete all entries for this account
+                    deleted = state_manager.delete_account_entries(args.account)
+                    logger.info(f"Reset state for account '{args.account}'. Deleted {deleted} entries.")
+            else:
+                logger.warning("This will reset the state for all accounts. All emails will be reprocessed.")
+                if args.force or input("Are you sure? (y/n): ").lower() == "y":
+                    # Delete the database file and recreate it
+                    db_path = os.path.join(state_dir, "processed_emails.db")
+                    if os.path.exists(db_path):
+                        os.remove(db_path)
+                        logger.info("State database deleted")
+                    
+                    # Reinitialize the database
+                    state_manager = SQLiteStateManager(db_path)
+                    logger.info("State database reinitialized")
+    
+    except Exception as e:
+        logger.error(f"Error managing state: {e}")
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(description="Email filtering and categorization tool")
@@ -219,6 +274,31 @@ def main():
         help="Path to JSON file containing filters"
     )
     filter_parser.set_defaults(func=handle_filter_command)
+    
+    # State command
+    state_parser = subparsers.add_parser("state", help="Manage the local state")
+    state_parser.add_argument(
+        "action",
+        choices=["view", "clean", "reset"],
+        help="Action to perform on the state"
+    )
+    state_parser.add_argument(
+        "--account", "-a",
+        type=str,
+        help="Account to manage state for"
+    )
+    state_parser.add_argument(
+        "--max-age-days",
+        type=int,
+        default=30,
+        help="Maximum age of state entries in days (for clean action)"
+    )
+    state_parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Force reset without confirmation"
+    )
+    state_parser.set_defaults(func=handle_state_command)
     
     # Parse arguments
     args = parser.parse_args()
