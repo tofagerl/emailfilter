@@ -20,11 +20,11 @@ def main() -> None:
     
     # Check if OpenAI API key is set
     try:
-        categorizer.load_api_key()
+        categorizer.load_api_key("config.yaml")
     except ValueError as e:
         print(f"Error: {e}")
-        print("\nPlease set your OpenAI API key in the .env file or as an environment variable:")
-        print("  OPENAI_API_KEY=your_api_key_here")
+        print("\nPlease add your OpenAI API key to your config.yaml file:")
+        print("openai_api_key: your_api_key_here")
         sys.exit(1)
     
     # Check if a file was provided

@@ -2,6 +2,7 @@
 
 import os
 import logging
+import yaml
 from enum import Enum, auto
 from typing import Dict, List, Optional, Union, Any
 
@@ -40,18 +41,35 @@ class EmailCategory(Enum):
 client = None
 
 
-def load_api_key() -> None:
-    """Load OpenAI API key from environment variables."""
+def load_api_key(config_path: str = "config.yaml") -> None:
+    """Load OpenAI API key from config file.
+    
+    Args:
+        config_path: Path to the YAML configuration file
+    """
     global client
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        logger.error("OpenAI API key not found in environment variables")
+    try:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+        
+        api_key = config.get("openai_api_key")
+        if not api_key:
+            logger.error("OpenAI API key not found in config file")
+            raise ValueError(
+                "OpenAI API key not found. Please add it to your config.yaml file."
+            )
+        client = OpenAI(api_key=api_key)
+        logger.info("OpenAI API key loaded successfully from config file")
+    except FileNotFoundError:
+        logger.error(f"Config file not found: {config_path}")
         raise ValueError(
-            "OpenAI API key not found. Please set the OPENAI_API_KEY environment variable."
+            f"Config file not found: {config_path}. Please create a config.yaml file with your OpenAI API key."
         )
-    client = OpenAI(api_key=api_key)
-    logger.info("OpenAI API key loaded successfully")
+    except Exception as e:
+        logger.error(f"Error loading config file: {e}")
+        raise ValueError(
+            f"Error loading config file: {e}. Please ensure your config.yaml file is valid."
+        )
 
 
 def set_api_key(api_key: str) -> None:

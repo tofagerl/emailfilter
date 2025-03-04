@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import logging
+import yaml
 from typing import Dict, List, Optional
 
 from emailfilter import categorizer, filter, imap_client
@@ -283,14 +284,12 @@ def handle_categorize_command(args: argparse.Namespace) -> None:
     logger.info(f"Loading emails from {args.input}")
     emails = load_emails(args.input)
     
-    # Get OpenAI API key from environment
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.error("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+    # Load OpenAI API key from config file
+    try:
+        categorizer.load_api_key(args.config)
+    except ValueError as e:
+        logger.error(str(e))
         sys.exit(1)
-    
-    # Set the API key
-    categorizer.set_api_key(api_key)
     
     # Clean up old logs if requested
     if args.cleanup_logs:
