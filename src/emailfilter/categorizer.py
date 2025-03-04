@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Union, Any
 
 import openai
 from openai import OpenAI
-from dotenv import load_dotenv
 
 # Configure logging
 logger = logging.getLogger(__name__)

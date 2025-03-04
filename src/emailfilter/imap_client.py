@@ -17,7 +17,7 @@ from email.message import Message
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import yaml
-from imapclient import IMAPClient, SEEN
+from imapclient import IMAPClient
 
 from emailfilter import categorizer
 
