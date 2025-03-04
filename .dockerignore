@@ -1,5 +1,6 @@
 # Git
 .git
+.github
 .gitignore
 
 # Python
@@ -27,10 +28,10 @@ var/
 .coverage
 htmlcov/
 .tox/
-.nox/
-.hypothesis/
-.venv/
+.venv
 venv/
+ENV/
+.DS_Store
 
 # Docker
 Dockerfile
