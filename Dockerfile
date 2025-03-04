@@ -19,7 +19,9 @@ COPY pyproject.toml README.md ./
 
 # Install dependencies
 RUN pip install --upgrade pip && \
-    pip wheel --no-cache-dir --wheel-dir /app/wheels -e .
+    pip install wheel hatchling && \
+    pip wheel --no-cache-dir --wheel-dir /app/wheels -e . && \
+    pip wheel --no-cache-dir --wheel-dir /app/wheels hatchling
 
 # Final stage
 FROM python:3.10-slim
@@ -44,7 +46,9 @@ COPY --from=builder /app/pyproject.toml /app/README.md ./
 COPY src ./src/
 
 # Install the package
-RUN pip install --no-cache-dir --no-index --find-links=/wheels -e . && \
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --no-index --find-links=/wheels hatchling && \
+    pip install --no-cache-dir --no-index --find-links=/wheels -e . && \
     rm -rf /wheels
 
 # Set volume for configuration
