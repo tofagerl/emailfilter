@@ -25,12 +25,14 @@ def main() -> None:
         print(f"Error: {e}")
         print("\nPlease add your OpenAI API key to your config.yaml file:")
         print("openai_api_key: your_api_key_here")
+        print("\nUsage: python main.py --config config.yaml <email_json_file>")
+        print("\nExample: python main.py --config config.yaml examples/sample_emails.json")
         sys.exit(1)
     
     # Check if a file was provided
     if len(sys.argv) < 2:
-        print("Usage: python main.py <email_json_file>")
-        print("\nExample: python main.py examples/sample_emails.json")
+        print("Usage: python main.py --config config.yaml <email_json_file>")
+        print("\nExample: python main.py --config config.yaml examples/sample_emails.json")
         sys.exit(1)
     
     # Load emails from the provided file

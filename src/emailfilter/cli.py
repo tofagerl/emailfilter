@@ -71,6 +71,12 @@ def parse_args() -> argparse.Namespace:
     # Categorize command
     categorize_parser = subparsers.add_parser("categorize", help="Categorize emails using OpenAI API")
     categorize_parser.add_argument(
+        "--config", "-c",
+        type=str,
+        required=True,
+        help="Path to YAML configuration file"
+    )
+    categorize_parser.add_argument(
         "--input", "-i", 
         type=str, 
         required=True,
