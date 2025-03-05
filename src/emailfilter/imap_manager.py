@@ -1,5 +1,6 @@
 """Manages IMAP connections and folder operations."""
 
+import email
 import logging
 from typing import Dict, List, Optional, Tuple
 
