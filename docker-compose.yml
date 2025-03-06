@@ -11,7 +11,7 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - ./config:/config
-      - emailfilter_data:/home/emailfilter
+      - /raid/media/config/emailfilter:/home/emailfilter
     # Resource limits
     deploy:
       resources:
@@ -38,7 +38,3 @@ services:
     # command: ["imap", "--config", "/config/config.yaml"]
     # Uncomment to run with specific options
     # command: ["imap", "--config", "/config/config.yaml", "--dry-run"]
-
-volumes:
-  emailfilter_data:
-    driver: local
