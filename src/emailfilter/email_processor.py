@@ -301,7 +301,40 @@ class EmailProcessor:
                             # Select folder
                             client.select_folder(folder)
                             
-                            # Use IDLE command to wait for new emails
+                            # First, process all existing emails in the folder
+                            logger.info(f"Processing existing emails in {folder}")
+                            emails = self.imap_manager.get_emails(
+                                client, 
+                                folder, 
+                                self.config_manager.options.max_emails_per_run
+                            )
+                            
+                            # Filter out already processed emails
+                            unprocessed_emails = {}
+                            for msg_id, email_obj in emails.items():
+                                if not self.state_manager.is_email_processed(account.name, email_obj):
+                                    unprocessed_emails[msg_id] = email_obj
+                            
+                            if unprocessed_emails:
+                                logger.info(f"Found {len(unprocessed_emails)} unprocessed emails in {folder}")
+                                # Categorize emails
+                                categorized_emails = self.categorize_emails(
+                                    client,
+                                    unprocessed_emails,
+                                    self.config_manager.options.batch_size
+                                )
+                                
+                                # Process categorized emails
+                                self.process_categorized_emails(
+                                    client,
+                                    categorized_emails,
+                                    folder,
+                                    account.name
+                                )
+                            else:
+                                logger.info(f"No unprocessed emails found in {folder}")
+                            
+                            # Now enter IDLE mode to wait for new emails
                             logger.info(f"Waiting for new emails in {folder}")
                             client.idle()
                             
@@ -316,8 +349,8 @@ class EmailProcessor:
                                     has_new_emails = True
                                     break
                             
-                            if has_new_emails or not responses:
-                                # Get all emails
+                            if has_new_emails:
+                                # Get new emails
                                 emails = self.imap_manager.get_emails(
                                     client, 
                                     folder, 
