@@ -120,10 +120,10 @@ class IMAPManager:
             logger.error(f"Error marking email {msg_id} as read: {e}")
             return False
     
-    def get_unread_emails(
+    def get_emails(
         self, client: IMAPClient, folder: str, max_emails: int
     ) -> Dict[int, Email]:
-        """Get unread emails from a folder.
+        """Get all emails from a folder.
         
         Args:
             client: The IMAPClient object
@@ -138,9 +138,9 @@ class IMAPManager:
             client.select_folder(folder)
             logger.info(f"Selected folder: {folder}")
             
-            # Search for unread emails
-            messages = client.search(['UNSEEN'])
-            logger.info(f"Found {len(messages)} unread emails in {folder}")
+            # Search for all emails in the folder
+            messages = client.search(['ALL'])
+            logger.info(f"Found {len(messages)} emails in {folder}")
             
             # Limit the number of emails
             if max_emails > 0 and len(messages) > max_emails:

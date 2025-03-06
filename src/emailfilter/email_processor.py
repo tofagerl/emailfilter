@@ -95,7 +95,13 @@ class EmailProcessor:
                 for j, msg_id in enumerate(batch_ids):
                     if j < len(results):
                         result = results[j]
-                        category = result.get("category", categorizer.EmailCategory.INBOX)
+                        # Convert string category to enum
+                        category_str = result.get("category", "inbox").upper()
+                        try:
+                            category = categorizer.EmailCategory[category_str]
+                        except KeyError:
+                            logger.warning(f"Invalid category '{category_str}', defaulting to INBOX")
+                            category = categorizer.EmailCategory.INBOX
                         categorized_emails[msg_id] = (emails[msg_id], category)
                     else:
                         # Fallback if result is missing
@@ -173,8 +179,8 @@ class EmailProcessor:
             # Process each folder
             for folder in account.folders:
                 try:
-                    # Get unprocessed emails
-                    emails = self.imap_manager.get_unread_emails(
+                    # Get all emails
+                    emails = self.imap_manager.get_emails(
                         client, 
                         folder, 
                         self.config_manager.options.max_emails_per_run
@@ -311,8 +317,8 @@ class EmailProcessor:
                                     break
                             
                             if has_new_emails or not responses:
-                                # Get unprocessed emails
-                                emails = self.imap_manager.get_unread_emails(
+                                # Get all emails
+                                emails = self.imap_manager.get_emails(
                                     client, 
                                     folder, 
                                     self.config_manager.options.max_emails_per_run
