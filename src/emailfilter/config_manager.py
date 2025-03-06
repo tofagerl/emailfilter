@@ -65,7 +65,8 @@ class ConfigManager:
                 max_emails_per_run=options_config.get("max_emails_per_run", 100),
                 batch_size=options_config.get("batch_size", 10),
                 idle_timeout=options_config.get("idle_timeout", 1740),
-                move_emails=options_config.get("move_emails", True)
+                move_emails=options_config.get("move_emails", True),
+                model=options_config.get("model", "gpt-4o-mini")
             )
             
             # Load OpenAI API key

@@ -90,7 +90,8 @@ def log_openai_interaction(email: Dict[str, str], prompt: str, response: str, ca
 def batch_categorize_emails_for_account(
     emails: List[Dict[str, str]], 
     account,
-    batch_size: int = 10
+    batch_size: int = 10,
+    model: str = "gpt-4o-mini"
 ) -> List[Dict[str, Any]]:
     """Categorize a batch of emails for a specific account.
     
@@ -98,6 +99,7 @@ def batch_categorize_emails_for_account(
         emails: List of email dictionaries
         account: The EmailAccount object with category definitions
         batch_size: Maximum number of emails to categorize in one batch
+        model: The OpenAI model to use for categorization
         
     Returns:
         List of dictionaries with categorization results
@@ -140,9 +142,9 @@ Use the category descriptions to guide your decision.
         user_prompt += f"Body: {email.get('body', '')[:1000]}...\n\n"
     
     try:
-        # Call OpenAI API
+        # Call OpenAI API with the specified model
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model=model,  # Use the model from configuration
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -161,7 +163,7 @@ Use the category descriptions to guide your decision.
         for i, email in enumerate(emails[:batch_size]):
             log_openai_interaction(
                 email, 
-                f"Batch categorization (email {i+1} of {len(emails[:batch_size])})", 
+                f"Batch categorization with {model} (email {i+1} of {len(emails[:batch_size])})", 
                 response_text, 
                 "See full response"
             )

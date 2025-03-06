@@ -127,6 +127,7 @@ class ProcessingOptions:
     batch_size: int = 10
     idle_timeout: int = 1740  # 29 minutes
     move_emails: bool = True
+    model: str = "gpt-4o-mini"  # Default to GPT-4o mini
     
     def __post_init__(self):
         pass 

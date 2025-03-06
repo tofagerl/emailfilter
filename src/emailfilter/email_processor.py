@@ -90,8 +90,13 @@ class EmailProcessor:
             
             try:
                 # Categorize batch
-                logger.info(f"Categorizing batch of {len(batch_emails)} emails")
-                results = categorizer.batch_categorize_emails_for_account(batch_emails, account, batch_size)
+                logger.info(f"Categorizing batch of {len(batch_emails)} emails using {self.config_manager.options.model}")
+                results = categorizer.batch_categorize_emails_for_account(
+                    batch_emails, 
+                    account, 
+                    batch_size,
+                    self.config_manager.options.model
+                )
                 
                 # Process results
                 for j, msg_id in enumerate(batch_ids):

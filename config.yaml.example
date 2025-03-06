@@ -3,6 +3,10 @@
 # OpenAI API Key
 openai_api_key: "your_openai_api_key_here"
 
+# AI Model Configuration
+# The application uses GPT-4o mini for email categorization
+# This provides better accuracy than GPT-3.5-turbo while being more cost-effective than GPT-4
+
 # Email Accounts
 accounts:
   - name: "Personal Gmail"
@@ -68,6 +72,10 @@ accounts:
 options:
   # Where to move emails after categorization
   move_emails: true
+  
+  # AI model to use for categorization
+  # Options: "gpt-4o-mini" (default), "gpt-3.5-turbo", "gpt-4", "gpt-4o"
+  model: "gpt-4o-mini"
   
   # Maximum number of emails to process per run
   max_emails_per_run: 100
