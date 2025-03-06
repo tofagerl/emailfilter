@@ -140,8 +140,8 @@ class EmailProcessor:
         # Process each email
         for msg_id, (email_obj, category_name) in categorized_emails.items():
             try:
-                # Mark as processed in local state
-                self.state_manager.mark_email_as_processed(account.name, email_obj)
+                # Mark as processed in local state with category information
+                self.state_manager.mark_email_as_processed(account.name, email_obj, category_name)
                 
                 # Move to appropriate folder if configured
                 if self.config_manager.options.move_emails:

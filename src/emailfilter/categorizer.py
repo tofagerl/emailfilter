@@ -70,11 +70,13 @@ def log_openai_interaction(email: Dict[str, str], prompt: str, response: str, ca
         category_result: The final category assigned
     """
     try:
-        # Create log entry
+        # Create log entry with more detailed email information
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "email_subject": email.get("subject", ""),
             "email_from": email.get("from", ""),
+            "email_to": email.get("to", ""),
+            "email_date": email.get("date", ""),
             "prompt": prompt,
             "response": response,
             "category": category_result
@@ -84,6 +86,15 @@ def log_openai_interaction(email: Dict[str, str], prompt: str, response: str, ca
         log_file = os.path.join(logs_dir, f"categorization_{datetime.now().strftime('%Y-%m-%d')}.log")
         with open(log_file, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
+            
+        # Log a summary to the application log
+        logger.info(
+            f"Categorized email: "
+            f"From: {email.get('from', '')[:40]}... | "
+            f"To: {email.get('to', '')[:40]}... | "
+            f"Subject: {email.get('subject', '')[:40]}... | "
+            f"Category: {category_result}"
+        )
     except Exception as e:
         logger.error(f"Error logging interaction: {e}")
 

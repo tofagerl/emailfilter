@@ -41,12 +41,17 @@ class SQLiteStateManager:
             conn = sqlite3.connect(self.db_file_path)
             cursor = conn.cursor()
             
-            # Create table for processed emails
+            # Create table for processed emails with additional fields
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS processed_emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_name TEXT NOT NULL,
                 email_id TEXT NOT NULL,
+                from_addr TEXT,
+                to_addr TEXT,
+                subject TEXT,
+                date TEXT,
+                category TEXT,
                 processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(account_name, email_id)
             )
@@ -56,6 +61,24 @@ class SQLiteStateManager:
             cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_account_email 
             ON processed_emails(account_name, email_id)
+            ''')
+            
+            # Create index for sender searches
+            cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_from_addr
+            ON processed_emails(from_addr)
+            ''')
+            
+            # Create index for recipient searches
+            cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_to_addr
+            ON processed_emails(to_addr)
+            ''')
+            
+            # Create index for subject searches
+            cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_subject
+            ON processed_emails(subject)
             ''')
             
             conn.commit()
@@ -107,12 +130,13 @@ class SQLiteStateManager:
             logger.error(f"Error checking if email is processed: {e}")
             return False
     
-    def mark_email_as_processed(self, account_name: str, email: Email) -> None:
+    def mark_email_as_processed(self, account_name: str, email: Email, category: str = None) -> None:
         """Mark an email as processed.
         
         Args:
             account_name: Name of the email account
             email: The email object
+            category: The category assigned to the email (optional)
         """
         email_id = self._generate_email_id(account_name, email)
         
@@ -120,15 +144,33 @@ class SQLiteStateManager:
             conn = sqlite3.connect(self.db_file_path)
             cursor = conn.cursor()
             
+            # Store more detailed email information
             cursor.execute(
-                "INSERT OR IGNORE INTO processed_emails (account_name, email_id) VALUES (?, ?)",
-                (account_name, email_id)
+                """
+                INSERT OR REPLACE INTO processed_emails 
+                (account_name, email_id, from_addr, to_addr, subject, date, category) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    account_name, 
+                    email_id, 
+                    email.from_addr[:255] if email.from_addr else None,  # Limit length to avoid DB issues
+                    email.to_addr[:255] if email.to_addr else None, 
+                    email.subject[:255] if email.subject else None,
+                    email.date,
+                    category
+                )
             )
             
             conn.commit()
             conn.close()
             
-            logger.debug(f"Marked email as processed: {account_name}:{email_id}")
+            logger.debug(
+                f"Marked email as processed: {account_name} | "
+                f"From: {email.from_addr[:40] if email.from_addr else 'None'} | "
+                f"Subject: {email.subject[:40] if email.subject else 'None'} | "
+                f"Category: {category or 'None'}"
+            )
         except Exception as e:
             logger.error(f"Error marking email as processed: {e}")
     
@@ -234,4 +276,109 @@ class SQLiteStateManager:
             return deleted_count
         except Exception as e:
             logger.error(f"Error deleting entries for account {account_name}: {e}")
-            return 0 
+            return 0
+    
+    def query_processed_emails(
+        self, 
+        account_name: Optional[str] = None,
+        from_addr: Optional[str] = None,
+        to_addr: Optional[str] = None,
+        subject: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[dict]:
+        """Query processed emails by various criteria.
+        
+        Args:
+            account_name: Filter by account name
+            from_addr: Filter by sender address (partial match)
+            to_addr: Filter by recipient address (partial match)
+            subject: Filter by subject (partial match)
+            category: Filter by category
+            limit: Maximum number of results to return
+            offset: Offset for pagination
+            
+        Returns:
+            List of dictionaries containing email information
+        """
+        try:
+            conn = sqlite3.connect(self.db_file_path)
+            conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+            cursor = conn.cursor()
+            
+            # Build query
+            query = "SELECT * FROM processed_emails WHERE 1=1"
+            params = []
+            
+            if account_name:
+                query += " AND account_name = ?"
+                params.append(account_name)
+            
+            if from_addr:
+                query += " AND from_addr LIKE ?"
+                params.append(f"%{from_addr}%")
+            
+            if to_addr:
+                query += " AND to_addr LIKE ?"
+                params.append(f"%{to_addr}%")
+            
+            if subject:
+                query += " AND subject LIKE ?"
+                params.append(f"%{subject}%")
+            
+            if category:
+                query += " AND category = ?"
+                params.append(category)
+            
+            # Add order by, limit and offset
+            query += " ORDER BY processed_date DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            
+            # Execute query
+            cursor.execute(query, params)
+            
+            # Convert rows to dictionaries
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(row))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            logger.error(f"Error querying processed emails: {e}")
+            return []
+    
+    def get_category_stats(self, account_name: Optional[str] = None) -> dict:
+        """Get statistics about email categories.
+        
+        Args:
+            account_name: Optional account name to filter by
+            
+        Returns:
+            Dictionary mapping categories to counts
+        """
+        try:
+            conn = sqlite3.connect(self.db_file_path)
+            cursor = conn.cursor()
+            
+            if account_name:
+                cursor.execute(
+                    "SELECT category, COUNT(*) FROM processed_emails WHERE account_name = ? GROUP BY category",
+                    (account_name,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT category, COUNT(*) FROM processed_emails GROUP BY category"
+                )
+            
+            stats = {}
+            for row in cursor.fetchall():
+                category, count = row
+                stats[category or "UNKNOWN"] = count
+            
+            conn.close()
+            return stats
+        except Exception as e:
+            logger.error(f"Error getting category stats: {e}")
+            return {} 

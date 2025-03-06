@@ -145,15 +145,58 @@ def handle_state_command(args):
             if args.account:
                 count = state_manager.get_processed_count(args.account)
                 logger.info(f"Account '{args.account}' has {count} processed emails")
+                
+                # Show category stats if requested
+                if args.stats:
+                    stats = state_manager.get_category_stats(args.account)
+                    logger.info(f"Category statistics for account '{args.account}':")
+                    for category, count in stats.items():
+                        logger.info(f"  {category}: {count} emails")
             else:
                 accounts = state_manager.get_accounts()
                 logger.info(f"Found {len(accounts)} accounts in the state database")
                 for account in accounts:
                     count = state_manager.get_processed_count(account)
                     logger.info(f"Account '{account}' has {count} processed emails")
+                    
+                    # Show category stats if requested
+                    if args.stats:
+                        stats = state_manager.get_category_stats(account)
+                        logger.info(f"  Category statistics:")
+                        for category, count in stats.items():
+                            logger.info(f"    {category}: {count} emails")
                 
                 total = state_manager.get_processed_count()
                 logger.info(f"Total processed emails: {total}")
+        
+        elif args.action == "search":
+            # Search for emails
+            results = state_manager.query_processed_emails(
+                account_name=args.account,
+                from_addr=args.from_addr,
+                to_addr=args.to_addr,
+                subject=args.subject,
+                category=args.category,
+                limit=args.limit,
+                offset=args.offset
+            )
+            
+            if results:
+                logger.info(f"Found {len(results)} matching emails:")
+                for i, email in enumerate(results):
+                    logger.info(f"Email {i+1}:")
+                    logger.info(f"  Account: {email['account_name']}")
+                    logger.info(f"  From: {email['from_addr']}")
+                    logger.info(f"  To: {email['to_addr']}")
+                    logger.info(f"  Subject: {email['subject']}")
+                    logger.info(f"  Category: {email['category']}")
+                    logger.info(f"  Processed: {email['processed_date']}")
+                    logger.info("")
+                
+                if len(results) == args.limit:
+                    logger.info(f"Showing {args.limit} results. Use --offset to see more.")
+            else:
+                logger.info("No matching emails found.")
         
         elif args.action == "clean":
             # Clean state
@@ -171,8 +214,10 @@ def handle_state_command(args):
             else:
                 logger.warning("This will reset the state for all accounts. All emails will be reprocessed.")
                 if args.force or input("Are you sure? (y/n): ").lower() == "y":
+                    # Get the database path
+                    db_path = state_manager.db_file_path
+                    
                     # Delete the database file and recreate it
-                    db_path = os.path.join(state_dir, "processed_emails.db")
                     if os.path.exists(db_path):
                         os.remove(db_path)
                         logger.info("State database deleted")
@@ -277,7 +322,7 @@ def main():
     state_parser = subparsers.add_parser("state", help="Manage the local state")
     state_parser.add_argument(
         "action",
-        choices=["view", "clean", "reset"],
+        choices=["view", "search", "clean", "reset"],
         help="Action to perform on the state"
     )
     state_parser.add_argument(
@@ -295,6 +340,44 @@ def main():
         "--force", "-f",
         action="store_true",
         help="Force reset without confirmation"
+    )
+    state_parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Show category statistics"
+    )
+    state_parser.add_argument(
+        "--from-addr",
+        type=str,
+        help="From address for search"
+    )
+    state_parser.add_argument(
+        "--to-addr",
+        type=str,
+        help="To address for search"
+    )
+    state_parser.add_argument(
+        "--subject",
+        type=str,
+        help="Subject for search"
+    )
+    state_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Number of results to show (default: 10)"
+    )
+    state_parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Offset for paginated results"
+    )
+    state_parser.add_argument(
+        "--category",
+        type=str,
+        choices=["spam", "receipts", "promotions", "updates", "inbox", "all"],
+        help="Category for search"
     )
     state_parser.set_defaults(func=handle_state_command)
     
