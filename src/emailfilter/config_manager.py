@@ -5,6 +5,7 @@ import logging
 from typing import Dict, List, Optional
 
 from .models import EmailAccount, ProcessingOptions
+from . import categorizer
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +47,27 @@ class ConfigManager:
             
             # Load options
             options_config = config.get("options", {})
+            
+            # Get custom categories if defined
+            custom_categories = options_config.get("custom_categories")
+            
+            # Get category folders mapping
+            category_folders = options_config.get("category_folders")
+            
             self.options = ProcessingOptions(
                 max_emails_per_run=options_config.get("max_emails_per_run", 100),
                 batch_size=options_config.get("batch_size", 10),
                 idle_timeout=options_config.get("idle_timeout", 1740),
                 move_emails=options_config.get("move_emails", True),
-                category_folders=options_config.get("category_folders", None)
+                category_folders=category_folders,
+                custom_categories=custom_categories
             )
+            
+            # Update the EmailCategory enum with custom categories if provided
+            if custom_categories:
+                # Recreate the EmailCategory enum with custom categories
+                categorizer.EmailCategory = categorizer.create_email_category_enum(custom_categories)
+                logger.info(f"Using custom categories: {custom_categories}")
             
             # Load OpenAI API key
             self.openai_api_key = config.get("openai_api_key")

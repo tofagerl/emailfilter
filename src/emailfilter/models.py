@@ -88,6 +88,7 @@ class ProcessingOptions:
     idle_timeout: int = 1740  # 29 minutes
     move_emails: bool = True
     category_folders: dict = None
+    custom_categories: List[str] = None
     
     def __post_init__(self):
         if self.category_folders is None:
@@ -97,4 +98,7 @@ class ProcessingOptions:
                 "promotions": "[Promotions]",
                 "updates": "[Updates]",
                 "inbox": "INBOX",
-            } 
+            }
+        
+        if self.custom_categories is None:
+            self.custom_categories = ["SPAM", "RECEIPTS", "PROMOTIONS", "UPDATES", "INBOX"] 

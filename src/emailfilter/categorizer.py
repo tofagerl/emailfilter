@@ -29,16 +29,41 @@ file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
 
-class EmailCategory(Enum):
-    """Email categories."""
-    SPAM = auto()
-    RECEIPTS = auto()
-    PROMOTIONS = auto()
-    UPDATES = auto()
-    INBOX = auto()
+# Default categories if not specified in config
+DEFAULT_CATEGORIES = ["SPAM", "RECEIPTS", "PROMOTIONS", "UPDATES", "INBOX"]
 
-    def __str__(self) -> str:
+# Dynamic EmailCategory enum creation
+def create_email_category_enum(categories=None):
+    """Create a dynamic EmailCategory enum with the given categories.
+    
+    Args:
+        categories: List of category names (strings)
+        
+    Returns:
+        An Enum class with the specified categories
+    """
+    if categories is None:
+        categories = DEFAULT_CATEGORIES
+    
+    # Ensure all categories are uppercase
+    categories = [cat.upper() for cat in categories]
+    
+    # Create enum items dictionary
+    enum_items = {category: auto() for category in categories}
+    
+    # Create the Enum class
+    EmailCategory = Enum('EmailCategory', enum_items)
+    
+    # Add __str__ method to the Enum class
+    def __str__(self):
         return self.name.capitalize()
+    
+    EmailCategory.__str__ = __str__
+    
+    return EmailCategory
+
+# Initialize with default categories, will be updated when config is loaded
+EmailCategory = create_email_category_enum()
 
 
 # Global client
@@ -333,38 +358,110 @@ def batch_categorize_emails(
     emails: List[Dict[str, str]], 
     batch_size: int = 10
 ) -> List[Dict[str, Any]]:
-    """
-    Categorize a batch of emails using OpenAI API.
+    """Categorize a batch of emails.
     
     Args:
         emails: List of email dictionaries
-        batch_size: Number of emails to process in each batch
+        batch_size: Maximum number of emails to categorize in one batch
         
     Returns:
-        List[Dict]: List of dictionaries with 'email' and 'category' keys
+        List of dictionaries with categorization results
     """
-    results = []
+    if not emails:
+        return []
     
-    logger.info(f"Batch categorizing {len(emails)} emails")
+    # Get all available categories
+    available_categories = [category.name.lower() for category in EmailCategory]
     
-    for i, email in enumerate(emails):
+    # Prepare system prompt
+    system_prompt = f"""You are an email categorization assistant. Your task is to categorize emails into one of the following categories:
+{', '.join(available_categories)}
+
+For each email, respond with a JSON object containing:
+1. "category": The category name (must be one of: {', '.join(available_categories)})
+2. "confidence": Your confidence level (0-100)
+3. "reasoning": Brief explanation of your categorization
+
+Analyze the email's subject, sender, and content to determine the most appropriate category.
+"""
+    
+    # Prepare user prompt
+    user_prompt = "Categorize the following emails:\n\n"
+    for i, email in enumerate(emails[:batch_size]):
+        user_prompt += f"Email {i+1}:\n"
+        user_prompt += f"From: {email.get('from', '')}\n"
+        user_prompt += f"To: {email.get('to', '')}\n"
+        user_prompt += f"Subject: {email.get('subject', '')}\n"
+        user_prompt += f"Date: {email.get('date', '')}\n"
+        user_prompt += f"Body: {email.get('body', '')[:1000]}...\n\n"
+    
+    try:
+        # Call OpenAI API
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.3,
+            max_tokens=1500,
+            top_p=1.0,
+            frequency_penalty=0.0,
+            presence_penalty=0.0
+        )
+        
+        # Parse response
+        response_text = response.choices[0].message.content
+        
+        # Log interaction for debugging
+        for i, email in enumerate(emails[:batch_size]):
+            log_openai_interaction(
+                email, 
+                f"Batch categorization (email {i+1} of {len(emails[:batch_size])})", 
+                response_text, 
+                "See full response"
+            )
+        
+        # Extract JSON objects from response
+        results = []
         try:
-            logger.debug(f"Processing email {i+1}/{len(emails)}")
-            category = categorize_email(email)
-            results.append({
-                "email": email,
-                "category": category.name.lower()
-            })
+            # Try to parse as a JSON array
+            import re
+            json_objects = re.findall(r'\{[^{}]*\}', response_text)
+            
+            for json_obj in json_objects:
+                try:
+                    result = json.loads(json_obj)
+                    # Ensure category is lowercase and valid
+                    if "category" in result:
+                        category = result["category"].lower()
+                        if category in available_categories:
+                            result["category"] = category
+                        else:
+                            # Default to inbox if category is invalid
+                            logger.warning(f"Invalid category: {category}, defaulting to inbox")
+                            result["category"] = "inbox"
+                    else:
+                        result["category"] = "inbox"
+                    
+                    results.append(result)
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse JSON object: {json_obj}")
+                    results.append({"category": "inbox", "confidence": 0, "reasoning": "Failed to parse response"})
         except Exception as e:
-            logger.error(f"Error categorizing email: {e}")
-            # Default to INBOX for errors
-            results.append({
-                "email": email,
-                "category": EmailCategory.INBOX.name.lower()
-            })
-    
-    logger.info(f"Completed batch categorization of {len(emails)} emails")
-    return results
+            logger.error(f"Error parsing response: {e}")
+            # Fallback: create default results
+            results = [{"category": "inbox", "confidence": 0, "reasoning": "Failed to parse response"}] * len(emails[:batch_size])
+        
+        # Ensure we have a result for each email
+        while len(results) < len(emails[:batch_size]):
+            results.append({"category": "inbox", "confidence": 0, "reasoning": "Missing from response"})
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error calling OpenAI API: {e}")
+        # Fallback: categorize all as inbox
+        return [{"category": "inbox", "confidence": 0, "reasoning": f"API error: {str(e)}"}] * len(emails[:batch_size])
 
 
 def batch_categorize_emails_with_custom_categories(

@@ -29,13 +29,27 @@ options:
   # Where to move emails after categorization
   move_emails: true
   
+  # Custom categories (optional)
+  # If not specified, defaults to ["SPAM", "RECEIPTS", "PROMOTIONS", "UPDATES", "INBOX"]
+  custom_categories:
+    - "SPAM"
+    - "RECEIPTS" 
+    - "PROMOTIONS"
+    - "UPDATES"
+    - "INBOX"
+    - "PERSONAL"  # Custom category example
+    - "WORK"      # Custom category example
+  
   # Folder names for each category (create these folders in your email account)
+  # The keys should be lowercase versions of your custom_categories
   category_folders:
     spam: "[Spam]"
     receipts: "[Receipts]"
     promotions: "[Promotions]"
     updates: "[Updates]"
     inbox: "INBOX"  # Keep important emails in inbox
+    personal: "[Personal]"  # Custom folder example
+    work: "[Work]"  # Custom folder example
   
   # Maximum number of emails to process per run
   max_emails_per_run: 100
@@ -55,7 +69,7 @@ options:
 # Local State System
 # The application now uses a local state system to track processed emails
 # instead of adding flags to emails. This state is stored in:
-# ~/.emailfilter/processed_emails.json
+# ~/.emailfilter/processed_emails.db
 #
 # You can manage this state using the CLI:
 # - View state: python -m emailfilter.cli state view
