@@ -4,7 +4,7 @@ import yaml
 import logging
 from typing import Dict, List, Optional
 
-from .models import EmailAccount, ProcessingOptions
+from .models import EmailAccount, ProcessingOptions, Category
 from . import categorizer
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,18 @@ class ConfigManager:
             
             # Load accounts
             for account_config in config.get("accounts", []):
+                # Load account-specific categories if defined
+                categories = None
+                if "categories" in account_config:
+                    categories = []
+                    for cat_config in account_config.get("categories", []):
+                        category = Category(
+                            name=cat_config.get("name", "").upper(),
+                            description=cat_config.get("description", ""),
+                            foldername=cat_config.get("foldername", "INBOX")
+                        )
+                        categories.append(category)
+                
                 account = EmailAccount(
                     name=account_config.get("name", ""),
                     email_address=account_config.get("email", ""),
@@ -42,32 +54,19 @@ class ConfigManager:
                     imap_port=account_config.get("imap_port", 993),
                     ssl=account_config.get("ssl", True),
                     folders=account_config.get("folders", ["INBOX"]),
+                    categories=categories
                 )
                 self.accounts.append(account)
             
             # Load options
             options_config = config.get("options", {})
             
-            # Get custom categories if defined
-            custom_categories = options_config.get("custom_categories")
-            
-            # Get category folders mapping
-            category_folders = options_config.get("category_folders")
-            
             self.options = ProcessingOptions(
                 max_emails_per_run=options_config.get("max_emails_per_run", 100),
                 batch_size=options_config.get("batch_size", 10),
                 idle_timeout=options_config.get("idle_timeout", 1740),
-                move_emails=options_config.get("move_emails", True),
-                category_folders=category_folders,
-                custom_categories=custom_categories
+                move_emails=options_config.get("move_emails", True)
             )
-            
-            # Update the EmailCategory enum with custom categories if provided
-            if custom_categories:
-                # Recreate the EmailCategory enum with custom categories
-                categorizer.EmailCategory = categorizer.create_email_category_enum(custom_categories)
-                logger.info(f"Using custom categories: {custom_categories}")
             
             # Load OpenAI API key
             self.openai_api_key = config.get("openai_api_key")
@@ -90,6 +89,15 @@ class ConfigManager:
         for account in self.accounts:
             if not account.name or not account.email_address or not account.password or not account.imap_server:
                 raise ValueError(f"Invalid account configuration for {account}")
+            
+            # Validate categories
+            category_names = set()
+            for category in account.categories:
+                if not category.name:
+                    raise ValueError(f"Category name cannot be empty for account {account.name}")
+                if category.name.upper() in category_names:
+                    raise ValueError(f"Duplicate category name '{category.name}' for account {account.name}")
+                category_names.add(category.name.upper())
         
         if not self.openai_api_key:
             raise ValueError("OpenAI API key not configured") 

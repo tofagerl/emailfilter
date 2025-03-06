@@ -51,13 +51,15 @@ class EmailProcessor:
         self,
         client: IMAPClient,
         emails: Dict[int, Email],
+        account,
         batch_size: int = 10,
-    ) -> Dict[int, Tuple[Email, categorizer.EmailCategory]]:
+    ) -> Dict[int, Tuple[Email, str]]:
         """Categorize emails using the OpenAI API.
         
         Args:
             client: The IMAPClient object
             emails: Dictionary mapping message IDs to Email objects
+            account: The EmailAccount object with category definitions
             batch_size: Number of emails to categorize in each batch
             
         Returns:
@@ -89,76 +91,68 @@ class EmailProcessor:
             try:
                 # Categorize batch
                 logger.info(f"Categorizing batch of {len(batch_emails)} emails")
-                results = categorizer.batch_categorize_emails(batch_emails, batch_size)
+                results = categorizer.batch_categorize_emails_for_account(batch_emails, account, batch_size)
                 
                 # Process results
                 for j, msg_id in enumerate(batch_ids):
                     if j < len(results):
                         result = results[j]
-                        # Convert string category to enum
-                        category_str = result.get("category", "inbox").upper()
-                        try:
-                            category = categorizer.EmailCategory[category_str]
-                        except KeyError:
-                            logger.warning(f"Invalid category '{category_str}', defaulting to INBOX")
-                            category = categorizer.EmailCategory.INBOX
-                        categorized_emails[msg_id] = (emails[msg_id], category)
+                        # Get category name from result
+                        category_name = result.get("category", "INBOX")
+                        categorized_emails[msg_id] = (emails[msg_id], category_name)
                     else:
                         # Fallback if result is missing
-                        categorized_emails[msg_id] = (emails[msg_id], categorizer.EmailCategory.INBOX)
+                        categorized_emails[msg_id] = (emails[msg_id], "INBOX")
             except Exception as e:
                 logger.error(f"Error categorizing batch: {e}")
                 # Fallback for the entire batch
                 for msg_id in batch_ids:
-                    categorized_emails[msg_id] = (emails[msg_id], categorizer.EmailCategory.INBOX)
+                    categorized_emails[msg_id] = (emails[msg_id], "INBOX")
         
         return categorized_emails
     
     def process_categorized_emails(
         self,
         client: IMAPClient,
-        categorized_emails: Dict[int, Tuple[Email, categorizer.EmailCategory]],
+        categorized_emails: Dict[int, Tuple[Email, str]],
+        account,
         current_folder: str = None,
-        account_name: str = None,
-    ) -> Dict[categorizer.EmailCategory, int]:
+    ) -> Dict[str, int]:
         """Process categorized emails (move to folders, mark as read, etc.).
         
         Args:
             client: The IMAPClient object
             categorized_emails: Dictionary mapping message IDs to tuples of (Email, category)
+            account: The EmailAccount object with category definitions
             current_folder: The current folder being processed
-            account_name: Name of the email account
             
         Returns:
             Dictionary mapping categories to counts of processed emails
         """
-        category_counts = {category: 0 for category in categorizer.EmailCategory}
-        
-        # Get folder mapping from config
-        category_folders = self.config_manager.options.category_folders
+        # Initialize category counts
+        category_counts = {category.name: 0 for category in account.categories}
         
         # Process each email
-        for msg_id, (email_obj, category) in categorized_emails.items():
+        for msg_id, (email_obj, category_name) in categorized_emails.items():
             try:
                 # Mark as processed in local state
-                if account_name:
-                    self.state_manager.mark_email_as_processed(account_name, email_obj)
+                self.state_manager.mark_email_as_processed(account.name, email_obj)
                 
                 # Move to appropriate folder if configured
                 if self.config_manager.options.move_emails:
-                    category_name = category.name.lower()
-                    target_folder = category_folders.get(category_name)
+                    target_folder = account.get_folder_for_category(category_name)
                     
                     if target_folder and (current_folder is None or target_folder != current_folder):
                         self.imap_manager.move_email(client, msg_id, target_folder)
                 
-                category_counts[category] += 1
+                # Update count for this category
+                category_counts[category_name] = category_counts.get(category_name, 0) + 1
             except Exception as e:
                 logger.error(f"Error processing email {msg_id}: {e}")
         
         return category_counts
     
-    def process_account(self, account: EmailAccount) -> Dict[str, Dict[categorizer.EmailCategory, int]]:
+    def process_account(self, account: EmailAccount) -> Dict[str, Dict[str, int]]:
         """Process emails for a single account.
         
         Args:
@@ -200,6 +194,7 @@ class EmailProcessor:
                     categorized_emails = self.categorize_emails(
                         client,
                         unprocessed_emails,
+                        account,
                         self.config_manager.options.batch_size
                     )
                     
@@ -207,8 +202,8 @@ class EmailProcessor:
                     category_counts = self.process_categorized_emails(
                         client,
                         categorized_emails,
-                        folder,
-                        account.name
+                        account,
+                        folder
                     )
                     
                     results[folder] = category_counts
@@ -220,7 +215,7 @@ class EmailProcessor:
             # Clean up
             self.imap_manager.disconnect(account.name)
     
-    def process_all_accounts(self) -> Dict[str, Dict[str, Dict[categorizer.EmailCategory, int]]]:
+    def process_all_accounts(self) -> Dict[str, Dict[str, Dict[str, int]]]:
         """Process emails for all accounts.
         
         Returns:
@@ -321,6 +316,7 @@ class EmailProcessor:
                                 categorized_emails = self.categorize_emails(
                                     client,
                                     unprocessed_emails,
+                                    account,
                                     self.config_manager.options.batch_size
                                 )
                                 
@@ -328,8 +324,8 @@ class EmailProcessor:
                                 self.process_categorized_emails(
                                     client,
                                     categorized_emails,
-                                    folder,
-                                    account.name
+                                    account,
+                                    folder
                                 )
                             else:
                                 logger.info(f"No unprocessed emails found in {folder}")
@@ -368,6 +364,7 @@ class EmailProcessor:
                                     categorized_emails = self.categorize_emails(
                                         client,
                                         unprocessed_emails,
+                                        account,
                                         self.config_manager.options.batch_size
                                     )
                                     
@@ -375,8 +372,8 @@ class EmailProcessor:
                                     self.process_categorized_emails(
                                         client,
                                         categorized_emails,
-                                        folder,
-                                        account.name
+                                        account,
+                                        folder
                                     )
                         except Exception as e:
                             logger.error(f"Error monitoring folder {folder}: {e}")
