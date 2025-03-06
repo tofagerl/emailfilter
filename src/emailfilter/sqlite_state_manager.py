@@ -36,26 +36,47 @@ class SQLiteStateManager:
         logger.info(f"SQLite state manager initialized with database at {self.db_file_path}")
     
     def _init_db(self) -> None:
-        """Initialize the SQLite database."""
+        """Initialize the SQLite database and handle migrations."""
         try:
             conn = sqlite3.connect(self.db_file_path)
             cursor = conn.cursor()
             
-            # Create table for processed emails with additional fields
+            # Create table for processed emails if it doesn't exist
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS processed_emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_name TEXT NOT NULL,
                 email_id TEXT NOT NULL,
-                from_addr TEXT,
-                to_addr TEXT,
-                subject TEXT,
-                date TEXT,
-                category TEXT,
                 processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(account_name, email_id)
             )
             ''')
+            
+            # Check if the new columns exist, and add them if they don't
+            # This handles migration from older versions of the database
+            cursor.execute("PRAGMA table_info(processed_emails)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            # Add new columns if they don't exist
+            if 'from_addr' not in columns:
+                logger.info("Adding 'from_addr' column to database")
+                cursor.execute("ALTER TABLE processed_emails ADD COLUMN from_addr TEXT")
+            
+            if 'to_addr' not in columns:
+                logger.info("Adding 'to_addr' column to database")
+                cursor.execute("ALTER TABLE processed_emails ADD COLUMN to_addr TEXT")
+            
+            if 'subject' not in columns:
+                logger.info("Adding 'subject' column to database")
+                cursor.execute("ALTER TABLE processed_emails ADD COLUMN subject TEXT")
+            
+            if 'date' not in columns:
+                logger.info("Adding 'date' column to database")
+                cursor.execute("ALTER TABLE processed_emails ADD COLUMN date TEXT")
+            
+            if 'category' not in columns:
+                logger.info("Adding 'category' column to database")
+                cursor.execute("ALTER TABLE processed_emails ADD COLUMN category TEXT")
             
             # Create index for faster lookups
             cursor.execute('''
@@ -144,23 +165,49 @@ class SQLiteStateManager:
             conn = sqlite3.connect(self.db_file_path)
             cursor = conn.cursor()
             
-            # Store more detailed email information
+            # Check if this email is already in the database
             cursor.execute(
-                """
-                INSERT OR REPLACE INTO processed_emails 
-                (account_name, email_id, from_addr, to_addr, subject, date, category) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    account_name, 
-                    email_id, 
-                    email.from_addr[:255] if email.from_addr else None,  # Limit length to avoid DB issues
-                    email.to_addr[:255] if email.to_addr else None, 
-                    email.subject[:255] if email.subject else None,
-                    email.date,
-                    category
-                )
+                "SELECT id FROM processed_emails WHERE account_name = ? AND email_id = ?",
+                (account_name, email_id)
             )
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing record with new information
+                cursor.execute(
+                    """
+                    UPDATE processed_emails 
+                    SET from_addr = ?, to_addr = ?, subject = ?, date = ?, category = ?
+                    WHERE account_name = ? AND email_id = ?
+                    """,
+                    (
+                        email.from_addr[:255] if email.from_addr else None,
+                        email.to_addr[:255] if email.to_addr else None,
+                        email.subject[:255] if email.subject else None,
+                        email.date,
+                        category,
+                        account_name,
+                        email_id
+                    )
+                )
+            else:
+                # Insert new record
+                cursor.execute(
+                    """
+                    INSERT INTO processed_emails 
+                    (account_name, email_id, from_addr, to_addr, subject, date, category) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        account_name, 
+                        email_id, 
+                        email.from_addr[:255] if email.from_addr else None,
+                        email.to_addr[:255] if email.to_addr else None,
+                        email.subject[:255] if email.subject else None,
+                        email.date,
+                        category
+                    )
+                )
             
             conn.commit()
             conn.close()
@@ -316,19 +363,19 @@ class SQLiteStateManager:
                 params.append(account_name)
             
             if from_addr:
-                query += " AND from_addr LIKE ?"
+                query += " AND (from_addr LIKE ? OR from_addr IS NULL)"
                 params.append(f"%{from_addr}%")
             
             if to_addr:
-                query += " AND to_addr LIKE ?"
+                query += " AND (to_addr LIKE ? OR to_addr IS NULL)"
                 params.append(f"%{to_addr}%")
             
             if subject:
-                query += " AND subject LIKE ?"
+                query += " AND (subject LIKE ? OR subject IS NULL)"
                 params.append(f"%{subject}%")
             
             if category:
-                query += " AND category = ?"
+                query += " AND (category = ? OR category IS NULL)"
                 params.append(category)
             
             # Add order by, limit and offset
@@ -341,7 +388,12 @@ class SQLiteStateManager:
             # Convert rows to dictionaries
             results = []
             for row in cursor.fetchall():
-                results.append(dict(row))
+                result = dict(row)
+                # Ensure all fields have values (not NULL)
+                for field in ['from_addr', 'to_addr', 'subject', 'date', 'category']:
+                    if result.get(field) is None:
+                        result[field] = ""
+                results.append(result)
             
             conn.close()
             return results
@@ -364,18 +416,18 @@ class SQLiteStateManager:
             
             if account_name:
                 cursor.execute(
-                    "SELECT category, COUNT(*) FROM processed_emails WHERE account_name = ? GROUP BY category",
+                    "SELECT COALESCE(category, 'UNKNOWN') as category, COUNT(*) FROM processed_emails WHERE account_name = ? GROUP BY category",
                     (account_name,)
                 )
             else:
                 cursor.execute(
-                    "SELECT category, COUNT(*) FROM processed_emails GROUP BY category"
+                    "SELECT COALESCE(category, 'UNKNOWN') as category, COUNT(*) FROM processed_emails GROUP BY category"
                 )
             
             stats = {}
             for row in cursor.fetchall():
                 category, count = row
-                stats[category or "UNKNOWN"] = count
+                stats[category] = count
             
             conn.close()
             return stats
