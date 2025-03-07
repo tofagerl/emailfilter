@@ -80,7 +80,7 @@ class IMAPManager:
             client.create_folder(folder)
     
     def move_email(self, client: IMAPClient, msg_id: int, target_folder: str) -> bool:
-        """Move an email to a target folder.
+        """Move an email to a target folder without changing its read/unread status.
         
         Args:
             client: The IMAPClient object
@@ -91,33 +91,63 @@ class IMAPManager:
             True if successful, False otherwise
         """
         try:
+            # Get the current folder
+            current_folder = client.selected_folder
+            
             # Ensure target folder exists
             self.ensure_folder_exists(client, target_folder)
+            
+            # Check if the message is unread before moving
+            response = client.fetch([msg_id], ['FLAGS', 'ENVELOPE'])
+            is_unread = b'\\Seen' not in response[msg_id][b'FLAGS']
+            
+            # Get message identifiers to find it after moving
+            envelope = response[msg_id][b'ENVELOPE']
+            message_id = envelope.message_id
+            subject = envelope.subject
+            date = envelope.date
             
             # Move the message
             client.move(msg_id, target_folder)
             logger.info(f"Moved email {msg_id} to {target_folder}")
+            
+            # If the message was unread, make sure it stays unread in the target folder
+            if is_unread:
+                # Select the target folder
+                client.select_folder(target_folder)
+                
+                # Search for the message in the target folder using message-id header
+                if message_id:
+                    # Search by Message-ID header
+                    search_criteria = ['HEADER', 'Message-ID', message_id.decode('utf-8', errors='ignore')]
+                    messages = client.search(search_criteria)
+                elif subject and date:
+                    # Fallback: search by subject and date
+                    subject_str = subject.decode('utf-8', errors='ignore') if isinstance(subject, bytes) else str(subject)
+                    search_criteria = ['SUBJECT', subject_str]
+                    messages = client.search(search_criteria)
+                else:
+                    # Last resort: get recent messages
+                    messages = client.search(['RECENT'])
+                
+                if messages:
+                    # Remove the Seen flag to keep it unread
+                    client.remove_flags(messages, [b'\\Seen'])
+                    logger.info(f"Preserved unread status for {len(messages)} emails in {target_folder}")
+                
+                # Return to the original folder
+                if current_folder:
+                    client.select_folder(current_folder)
+            
             return True
         except Exception as e:
             logger.error(f"Error moving email {msg_id} to {target_folder}: {e}")
-            return False
-    
-    def mark_as_read(self, client: IMAPClient, msg_id: int) -> bool:
-        """Mark an email as read.
-        
-        Args:
-            client: The IMAPClient object
-            msg_id: The message ID to mark as read
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            client.add_flags(msg_id, [b'\\Seen'])
-            logger.info(f"Marked email {msg_id} as read")
-            return True
-        except Exception as e:
-            logger.error(f"Error marking email {msg_id} as read: {e}")
+            # Try to return to the original folder
+            try:
+                if current_folder:
+                    client.select_folder(current_folder)
+            except:
+                pass
             return False
     
     def get_emails(
