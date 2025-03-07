@@ -223,6 +223,7 @@ Use the category descriptions to guide your decision.
         # Fallback: categorize all as inbox
         return [{"category": "INBOX", "confidence": 0, "reasoning": f"API error: {str(e)}"}] * len(emails[:batch_size])
 
+# For backward compatibility with tests and examples
 # Default categories if not specified in config
 DEFAULT_CATEGORIES = ["SPAM", "RECEIPTS", "PROMOTIONS", "UPDATES", "INBOX"]
 
@@ -256,8 +257,48 @@ def create_email_category_enum(categories=None):
     
     return EmailCategory
 
-# Initialize with default categories, will be updated when config is loaded
+# Initialize with default categories for backward compatibility
 EmailCategory = create_email_category_enum()
+
+def cleanup_old_logs(max_age_days: int = 7) -> int:
+    """Clean up old log files.
+    
+    Args:
+        max_age_days: Maximum age of log files in days
+        
+    Returns:
+        Number of files deleted
+    """
+    try:
+        # Get current time
+        now = datetime.now()
+        cutoff_date = now - timedelta(days=max_age_days)
+        
+        # Get list of log files
+        log_files = [f for f in os.listdir(logs_dir) if f.startswith("categorization_")]
+        
+        # Delete old files
+        deleted_count = 0
+        for file_name in log_files:
+            try:
+                # Extract date from filename
+                date_str = file_name.replace("categorization_", "").replace(".log", "")
+                file_date = datetime.strptime(date_str, "%Y-%m-%d")
+                
+                # Check if file is older than cutoff date
+                if file_date < cutoff_date:
+                    os.remove(os.path.join(logs_dir, file_name))
+                    deleted_count += 1
+            except Exception as e:
+                logger.error(f"Error processing log file {file_name}: {e}")
+        
+        return deleted_count
+    except Exception as e:
+        logger.error(f"Error cleaning up old logs: {e}")
+        return 0
+
+# The following functions are kept for backward compatibility with tests and examples
+# They are deprecated and will be removed in a future version
 
 def categorize_email(email: Dict[str, str]) -> EmailCategory:
     """
@@ -268,7 +309,13 @@ def categorize_email(email: Dict[str, str]) -> EmailCategory:
         
     Returns:
         EmailCategory: The predicted category for the email
+        
+    Note:
+        This function is deprecated and will be removed in a future version.
+        Use batch_categorize_emails_for_account instead.
     """
+    logger.warning("categorize_email is deprecated, use batch_categorize_emails_for_account instead")
+    
     # Ensure API key is loaded
     global client
     if not client:
@@ -357,124 +404,6 @@ def categorize_email(email: Dict[str, str]) -> EmailCategory:
         # Default to INBOX for errors
         return EmailCategory.INBOX
 
-def categorize_email_with_custom_categories(
-    email: Dict[str, str], 
-    categories: List[Dict[str, Any]]
-) -> Dict[str, Any]:
-    """
-    Categorize a single email using OpenAI API with custom categories.
-    
-    Args:
-        email: Email dictionary with keys like 'subject', 'from', 'body', etc.
-        categories: List of category dictionaries with keys 'id', 'name', and 'description'
-        
-    Returns:
-        Dict: The predicted category dictionary with 'id', 'name', and 'description'
-    """
-    # Ensure API key is loaded
-    if not client:
-        logger.debug("API key not set, loading from environment")
-        load_api_key()
-    
-    # Prepare the email content for the API
-    email_content = f"""
-    From: {email.get('from', 'Unknown')}
-    To: {email.get('to', 'Unknown')}
-    Subject: {email.get('subject', 'No Subject')}
-    Date: {email.get('date', 'Unknown')}
-    
-    {email.get('body', 'No Body')}
-    """
-    
-    # Create category descriptions for the prompt
-    category_descriptions = []
-    for category in categories:
-        description = category.get('description', '')
-        if description:
-            category_descriptions.append(f"- {category['name']}: {description}")
-        else:
-            category_descriptions.append(f"- {category['name']}")
-    
-    category_text = "\n".join(category_descriptions)
-    
-    # Define the prompt for the API
-    prompt = f"""
-    Categorize the following email into exactly one of these categories:
-    {category_text}
-    
-    Email:
-    {email_content}
-    
-    Category:
-    """
-    
-    logger.info(f"Categorizing email with custom categories: {email.get('subject', 'No Subject')}")
-    
-    try:
-        # Call the OpenAI API with GPT-4o-mini
-        logger.debug("Sending request to OpenAI API with custom categories")
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Using GPT-4o-mini for efficient categorization
-            messages=[
-                {"role": "system", "content": "You are an email categorization assistant. Categorize the email into exactly one of the specified categories."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=10,
-            temperature=0.2  # Lower temperature for more consistent results
-        )
-        
-        # Extract and parse the category from the response
-        category_text = response.choices[0].message.content.strip().upper()
-        logger.info(f"OpenAI categorized email as: {category_text}")
-        
-        # Map the response to our categories
-        # First try exact match
-        selected_category = None
-        for category in categories:
-            if category['name'].upper() == category_text:
-                selected_category = category
-                break
-        
-        # Then try partial match
-        if not selected_category:
-            for category in categories:
-                if category['name'].upper() in category_text:
-                    selected_category = category
-                    break
-        
-        # Default to the first category with name "INBOX" if it exists
-        if not selected_category:
-            for category in categories:
-                if category['name'].upper() == "INBOX":
-                    selected_category = category
-                    break
-        
-        # Otherwise, return the first category
-        if not selected_category:
-            selected_category = categories[0] if categories else {"id": 0, "name": "INBOX", "description": "Default category"}
-        
-        # Log the interaction
-        log_openai_interaction(
-            email=email,
-            prompt=prompt,
-            response=response.choices[0].message.content,
-            category_result=selected_category['name']
-        )
-        
-        return selected_category
-    
-    except Exception as e:
-        logger.error(f"Error categorizing email with custom categories: {e}")
-        # Log the error
-        log_openai_interaction(
-            email=email,
-            prompt=prompt,
-            response=f"ERROR: {str(e)}",
-            category_result="ERROR"
-        )
-        # Default to first category for errors
-        return categories[0] if categories else {"id": 0, "name": "INBOX", "description": "Default category"}
-
 def batch_categorize_emails(
     emails: List[Dict[str, str]], 
     batch_size: int = 10
@@ -487,248 +416,65 @@ def batch_categorize_emails(
         
     Returns:
         List of dictionaries with categorization results
+        
+    Note:
+        This function is deprecated and will be removed in a future version.
+        Use batch_categorize_emails_for_account instead.
     """
-    if not emails:
-        return []
+    logger.warning("batch_categorize_emails is deprecated, use batch_categorize_emails_for_account instead")
     
-    # Get all available categories
-    available_categories = [category.name.lower() for category in EmailCategory]
-    
-    # Prepare system prompt
-    system_prompt = f"""You are an email categorization assistant. Your task is to categorize emails into one of the following categories:
-{', '.join(available_categories)}
-
-For each email, respond with a JSON object containing:
-1. "category": The category name (must be one of: {', '.join(available_categories)})
-2. "confidence": Your confidence level (0-100)
-3. "reasoning": Brief explanation of your categorization
-
-Analyze the email's subject, sender, and content to determine the most appropriate category.
-"""
-    
-    # Prepare user prompt
-    user_prompt = "Categorize the following emails:\n\n"
-    for i, email in enumerate(emails[:batch_size]):
-        user_prompt += f"Email {i+1}:\n"
-        user_prompt += f"From: {email.get('from', '')}\n"
-        user_prompt += f"To: {email.get('to', '')}\n"
-        user_prompt += f"Subject: {email.get('subject', '')}\n"
-        user_prompt += f"Date: {email.get('date', '')}\n"
-        user_prompt += f"Body: {email.get('body', '')[:1000]}...\n\n"
-    
-    try:
-        # Call OpenAI API
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,
-            max_tokens=1500,
-            top_p=1.0,
-            frequency_penalty=0.0,
-            presence_penalty=0.0
-        )
-        
-        # Parse response
-        response_text = response.choices[0].message.content
-        
-        # Log interaction for debugging
-        for i, email in enumerate(emails[:batch_size]):
-            log_openai_interaction(
-                email, 
-                f"Batch categorization (email {i+1} of {len(emails[:batch_size])})", 
-                response_text, 
-                "See full response"
-            )
-        
-        # Extract JSON objects from response
-        results = []
-        try:
-            # Try to parse as a JSON array
-            import re
-            json_objects = re.findall(r'\{[^{}]*\}', response_text)
-            
-            for json_obj in json_objects:
-                try:
-                    result = json.loads(json_obj)
-                    # Ensure category is lowercase and valid
-                    if "category" in result:
-                        category = result["category"].lower()
-                        if category in available_categories:
-                            result["category"] = category
-                        else:
-                            # Default to inbox if category is invalid
-                            logger.warning(f"Invalid category: {category}, defaulting to inbox")
-                            result["category"] = "inbox"
-                    else:
-                        result["category"] = "inbox"
-                    
-                    results.append(result)
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse JSON object: {json_obj}")
-                    results.append({"category": "inbox", "confidence": 0, "reasoning": "Failed to parse response"})
-        except Exception as e:
-            logger.error(f"Error parsing response: {e}")
-            # Fallback: create default results
-            results = [{"category": "inbox", "confidence": 0, "reasoning": "Failed to parse response"}] * len(emails[:batch_size])
-        
-        # Ensure we have a result for each email
-        while len(results) < len(emails[:batch_size]):
-            results.append({"category": "inbox", "confidence": 0, "reasoning": "Missing from response"})
-        
-        return results
-    except Exception as e:
-        logger.error(f"Error calling OpenAI API: {e}")
-        # Fallback: categorize all as inbox
-        return [{"category": "inbox", "confidence": 0, "reasoning": f"API error: {str(e)}"}] * len(emails[:batch_size])
-
-def batch_categorize_emails_with_custom_categories(
-    emails: List[Dict[str, str]], 
-    categories: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
-    """
-    Categorize a batch of emails using OpenAI API with custom categories.
-    
-    Args:
-        emails: List of email dictionaries
-        categories: List of category dictionaries with keys 'id', 'name', and 'description'
-        
-    Returns:
-        List[Dict]: List of dictionaries with 'email' and 'category' keys
-    """
     results = []
     
-    logger.info(f"Batch categorizing {len(emails)} emails with custom categories")
-    
-    for i, email in enumerate(emails):
+    for email in emails[:batch_size]:
         try:
-            logger.debug(f"Processing email {i+1}/{len(emails)} with custom categories")
-            category = categorize_email_with_custom_categories(email, categories)
+            category = categorize_email(email)
             results.append({
-                "email": email,
-                "category": category
+                "category": category.name.lower(),
+                "confidence": 90,
+                "reasoning": "Categorized using legacy function"
             })
         except Exception as e:
-            logger.error(f"Error categorizing email with custom categories: {e}")
-            # Default to first category for errors
-            default_category = categories[0] if categories else {"id": 0, "name": "INBOX", "description": "Default category"}
+            logger.error(f"Error categorizing email: {e}")
             results.append({
-                "email": email,
-                "category": default_category
+                "category": "inbox",
+                "confidence": 0,
+                "reasoning": f"Error: {str(e)}"
             })
     
-    logger.info(f"Completed batch categorization of {len(emails)} emails with custom categories")
     return results
 
 def categorize_and_filter(
-    emails: List[Dict[str, str]]
+    emails: List[Dict[str, str]],
+    categories=None
 ) -> Dict[EmailCategory, List[Dict[str, str]]]:
-    """
-    Categorize emails and filter them based on categories.
+    """Categorize emails and filter them by category.
     
     Args:
         emails: List of email dictionaries
+        categories: Optional list of categories to filter by
         
     Returns:
         Dict[EmailCategory, List[Dict]]: Dictionary mapping categories to lists of emails
+        
+    Note:
+        This function is deprecated and will be removed in a future version.
     """
-    # Initialize result dictionary with empty lists for each category
+    logger.warning("categorize_and_filter is deprecated")
+    
+    # Initialize result dictionary
     result = {category: [] for category in EmailCategory}
     
-    logger.info(f"Categorizing and filtering {len(emails)} emails")
-    
-    # Categorize each email and add it to the appropriate list
-    for i, email in enumerate(emails):
+    # Categorize each email
+    for email in emails:
         try:
-            logger.debug(f"Processing email {i+1}/{len(emails)}")
             category = categorize_email(email)
-            result[category].append(email)
+            
+            # Filter by categories if specified
+            if categories is None or category in categories:
+                result[category].append(email)
         except Exception as e:
             logger.error(f"Error categorizing email: {e}")
-            # Default to INBOX for errors
+            # Add to INBOX on error
             result[EmailCategory.INBOX].append(email)
     
-    logger.info(f"Completed categorization and filtering of {len(emails)} emails")
-    return result
-
-
-def categorize_and_filter_with_custom_categories(
-    emails: List[Dict[str, str]], 
-    categories: List[Dict[str, Any]]
-) -> Dict[str, List[Dict[str, str]]]:
-    """
-    Categorize emails with custom categories and filter them based on categories.
-    
-    Args:
-        emails: List of email dictionaries
-        categories: List of category dictionaries with keys 'id', 'name', and 'description'
-        
-    Returns:
-        Dict[str, List[Dict]]: Dictionary mapping category names to lists of emails
-    """
-    # Initialize result dictionary with empty lists for each category
-    result = {category['name']: [] for category in categories}
-    
-    logger.info(f"Categorizing and filtering {len(emails)} emails with custom categories")
-    
-    # Categorize each email and add it to the appropriate list
-    for i, email in enumerate(emails):
-        try:
-            logger.debug(f"Processing email {i+1}/{len(emails)} with custom categories")
-            category = categorize_email_with_custom_categories(email, categories)
-            result[category['name']].append(email)
-        except Exception as e:
-            logger.error(f"Error categorizing email with custom categories: {e}")
-            # Default to first category for errors
-            default_category_name = categories[0]['name'] if categories else "INBOX"
-            result[default_category_name].append(email)
-    
-    logger.info(f"Completed categorization and filtering of {len(emails)} emails with custom categories")
-    return result
-
-
-def cleanup_old_logs(max_age_days: int = 7) -> int:
-    """
-    Clean up old log entries.
-    
-    Args:
-        max_age_days: Maximum age of log entries in days
-        
-    Returns:
-        Number of deleted log entries
-    """
-    try:
-        log_file = os.path.join(logs_dir, 'detailed_openai_logs.jsonl')
-        
-        if not os.path.exists(log_file):
-            logger.info(f"Log file not found: {log_file}")
-            return 0
-        
-        # Calculate cutoff date
-        cutoff_date = datetime.now() - timedelta(days=max_age_days)
-        
-        # Read existing logs
-        with open(log_file, 'r') as f:
-            logs = [json.loads(line) for line in f if line.strip()]
-        
-        # Filter logs by date
-        old_count = len(logs)
-        logs = [
-            log for log in logs 
-            if datetime.fromisoformat(log.get("timestamp", "2000-01-01")) > cutoff_date
-        ]
-        new_count = len(logs)
-        deleted_count = old_count - new_count
-        
-        # Write back filtered logs
-        with open(log_file, 'w') as f:
-            for log in logs:
-                f.write(json.dumps(log) + "\n")
-        
-        logger.info(f"Cleaned up {deleted_count} log entries older than {max_age_days} days")
-        return deleted_count
-    except Exception as e:
-        logger.error(f"Error cleaning up logs: {e}")
-        return 0 
+    return result 

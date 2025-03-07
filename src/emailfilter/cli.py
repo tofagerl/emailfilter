@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 
 from emailfilter import categorizer
 from emailfilter.email_processor import main as email_processor_main
-from emailfilter.models import Email
+from emailfilter.models import Email, EmailAccount, Category
 from emailfilter.sqlite_state_manager import SQLiteStateManager
 
 # Configure logging
@@ -40,57 +40,163 @@ def handle_categorize_command(args):
             deleted = categorizer.cleanup_old_logs(args.cleanup_logs_days)
             logger.info(f"Deleted {deleted} old log files")
         
+        # Create a mock account with the appropriate categories
+        mock_account = EmailAccount(
+            name="CLI",
+            email_address="cli@example.com",
+            password="",
+            imap_server="",
+            categories=[
+                Category("SPAM", "Unwanted or malicious emails", "[Spam]"),
+                Category("RECEIPTS", "Purchase confirmations and receipts", "[Receipts]"),
+                Category("PROMOTIONS", "Marketing and promotional emails", "[Promotions]"),
+                Category("UPDATES", "Updates and notifications", "[Updates]"),
+                Category("INBOX", "Important emails that need attention", "INBOX")
+            ]
+        )
+        
         # Categorize emails
         if args.custom_categories:
+            # Load custom categories from file
             with open(args.custom_categories, "r") as f:
-                categories = json.load(f)
+                custom_categories_data = json.load(f)
             
+            # Create Category objects
+            categories = []
+            for cat in custom_categories_data:
+                categories.append(Category(
+                    name=cat.get("name", "").upper(),
+                    description=cat.get("description", ""),
+                    foldername=cat.get("foldername", "INBOX")
+                ))
+            
+            # Create mock account
+            mock_account = EmailAccount(
+                name="CLI",
+                email_address="cli@example.com",
+                password="",
+                imap_server="",
+                categories=categories
+            )
+            
+            # Categorize emails
             if args.category != "all":
-                logger.info(f"Filtering by custom category: {args.category}")
-                results = categorizer.categorize_and_filter_with_custom_categories(emails, categories)
-                filtered_emails = results.get(args.category, [])
+                logger.info(f"Filtering by category: {args.category}")
+                
+                # Categorize all emails
+                results = []
+                for i in range(0, len(emails), args.batch_size):
+                    batch = emails[i:i+args.batch_size]
+                    batch_results = categorizer.batch_categorize_emails_for_account(
+                        batch, mock_account, args.batch_size, args.model
+                    )
+                    results.extend(batch_results)
+                
+                # Filter by category
+                filtered_emails = []
+                for i, email in enumerate(emails):
+                    if i < len(results) and results[i]["category"].upper() == args.category.upper():
+                        filtered_emails.append(email)
+                
                 logger.info(f"Found {len(filtered_emails)} emails in category {args.category}")
                 
                 # Write results to output file
                 with open(args.output, "w") as f:
                     json.dump(filtered_emails, f, indent=2)
             else:
-                logger.info("Categorizing emails with custom categories")
-                results = categorizer.categorize_and_filter_with_custom_categories(emails, categories)
+                logger.info("Categorizing emails")
+                
+                # Categorize all emails
+                all_results = {}
+                for cat in categories:
+                    all_results[cat.name.lower()] = []
+                
+                for i in range(0, len(emails), args.batch_size):
+                    batch = emails[i:i+args.batch_size]
+                    batch_results = categorizer.batch_categorize_emails_for_account(
+                        batch, mock_account, args.batch_size, args.model
+                    )
+                    
+                    # Group by category
+                    for j, email in enumerate(batch):
+                        if j < len(batch_results):
+                            category = batch_results[j]["category"].lower()
+                            all_results[category].append(email)
                 
                 # Write results to output file
                 with open(args.output, "w") as f:
-                    json.dump(results, f, indent=2)
+                    json.dump(all_results, f, indent=2)
                 
                 # Print summary
-                for category, emails in results.items():
+                for category, emails in all_results.items():
                     logger.info(f"Category {category}: {len(emails)} emails")
         else:
+            # Use default categories
+            default_categories = [
+                Category("SPAM", "Unwanted or malicious emails", "[Spam]"),
+                Category("RECEIPTS", "Purchase confirmations and receipts", "[Receipts]"),
+                Category("PROMOTIONS", "Marketing and promotional emails", "[Promotions]"),
+                Category("UPDATES", "Updates and notifications", "[Updates]"),
+                Category("INBOX", "Important emails that need attention", "INBOX")
+            ]
+            
+            # Create mock account
+            mock_account = EmailAccount(
+                name="CLI",
+                email_address="cli@example.com",
+                password="",
+                imap_server="",
+                categories=default_categories
+            )
+            
+            # Categorize emails
             if args.category != "all":
                 logger.info(f"Filtering by category: {args.category}")
-                category_enum = getattr(categorizer.EmailCategory, args.category.upper())
-                results = categorizer.categorize_and_filter(emails)
-                filtered_emails = results.get(category_enum, [])
-                logger.info(f"Found {len(filtered_emails)} emails in category {category_enum}")
+                
+                # Categorize all emails
+                results = []
+                for i in range(0, len(emails), args.batch_size):
+                    batch = emails[i:i+args.batch_size]
+                    batch_results = categorizer.batch_categorize_emails_for_account(
+                        batch, mock_account, args.batch_size, args.model
+                    )
+                    results.extend(batch_results)
+                
+                # Filter by category
+                filtered_emails = []
+                for i, email in enumerate(emails):
+                    if i < len(results) and results[i]["category"].upper() == args.category.upper():
+                        filtered_emails.append(email)
+                
+                logger.info(f"Found {len(filtered_emails)} emails in category {args.category}")
                 
                 # Write results to output file
                 with open(args.output, "w") as f:
                     json.dump(filtered_emails, f, indent=2)
             else:
                 logger.info("Categorizing emails")
-                results = categorizer.categorize_and_filter(emails)
                 
-                # Convert results to serializable format
-                serializable_results = {}
-                for category, emails in results.items():
-                    serializable_results[category.name.lower()] = emails
+                # Categorize all emails
+                all_results = {cat.name.lower(): [] for cat in default_categories}
+                
+                for i in range(0, len(emails), args.batch_size):
+                    batch = emails[i:i+args.batch_size]
+                    batch_results = categorizer.batch_categorize_emails_for_account(
+                        batch, mock_account, args.batch_size, args.model
+                    )
+                    
+                    # Group by category
+                    for j, email in enumerate(batch):
+                        if j < len(batch_results):
+                            category = batch_results[j]["category"].lower()
+                            all_results[category].append(email)
                 
                 # Write results to output file
                 with open(args.output, "w") as f:
-                    json.dump(serializable_results, f, indent=2)
+                    json.dump(all_results, f, indent=2)
                 
                 # Print summary
-                for category, emails in results.items():
+                for category, emails in all_results.items():
                     logger.info(f"Category {category}: {len(emails)} emails")
     except Exception as e:
         logger.error(f"Error categorizing email: {e}")
@@ -278,6 +384,17 @@ def main():
         type=int,
         default=7,
         help="Maximum age of log files in days (default: 7)"
+    )
+    categorize_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=100,
+        help="Batch size for categorization"
+    )
+    categorize_parser.add_argument(
+        "--model",
+        type=str,
+        help="Model to use for categorization"
     )
     categorize_parser.set_defaults(func=handle_categorize_command)
     
