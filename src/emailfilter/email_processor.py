@@ -140,18 +140,30 @@ class EmailProcessor:
         # Process each email
         for msg_id, (email_obj, category_name) in categorized_emails.items():
             try:
-                # Mark as processed in local state with category information
-                self.state_manager.mark_email_as_processed(account.name, email_obj, category_name)
+                move_successful = True
                 
                 # Move to appropriate folder if configured
                 if self.config_manager.options.move_emails:
                     target_folder = account.get_folder_for_category(category_name)
                     
                     if target_folder and (current_folder is None or target_folder != current_folder):
-                        self.imap_manager.move_email(client, msg_id, target_folder)
+                        # Attempt to move the email
+                        move_successful = self.imap_manager.move_email(client, msg_id, target_folder)
+                        
+                        if not move_successful:
+                            logger.warning(f"Failed to move email {msg_id} to {target_folder}, skipping database update")
+                            continue
                 
-                # Update count for this category
-                category_counts[category_name] = category_counts.get(category_name, 0) + 1
+                # Only mark as processed in the database if the move was successful
+                # or if we're not configured to move emails
+                if move_successful:
+                    # Mark as processed in local state with category information
+                    self.state_manager.mark_email_as_processed(account.name, email_obj, category_name)
+                    
+                    # Update count for this category
+                    category_counts[category_name] = category_counts.get(category_name, 0) + 1
+                    
+                    logger.info(f"Email {msg_id} processed successfully and marked in database")
             except Exception as e:
                 logger.error(f"Error processing email {msg_id}: {e}")
         
