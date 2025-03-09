@@ -12,6 +12,9 @@ from emailfilter.email_processor import main as email_processor_main
 from emailfilter.models import Email, EmailAccount, Category
 from emailfilter.sqlite_state_manager import SQLiteStateManager
 
+# Version information
+__version__ = "1.0.0"
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +22,11 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
+
+
+def handle_version_command(args):
+    """Handle the version command."""
+    print(f"emailfilter version {__version__}")
 
 
 def handle_categorize_command(args):
@@ -340,6 +348,14 @@ def handle_state_command(args):
 def main():
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(description="Email filtering and categorization tool")
+    
+    # Add version argument
+    parser.add_argument(
+        "--version", "-v",
+        action="store_true",
+        help="Show version information"
+    )
+    
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
     
     # Categorize command
@@ -359,8 +375,8 @@ def main():
     categorize_parser.add_argument(
         "--output", "-o",
         type=str,
-        default="categorized_emails.json",
-        help="Path to output JSON file (default: categorized_emails.json)"
+        required=True,
+        help="Path to output JSON file for categorized emails"
     )
     categorize_parser.add_argument(
         "--category", "-cat",
@@ -500,6 +516,11 @@ def main():
     
     # Parse arguments
     args = parser.parse_args()
+    
+    # Handle version command
+    if args.version:
+        handle_version_command(args)
+        return
     
     # Run command
     if hasattr(args, "func"):
