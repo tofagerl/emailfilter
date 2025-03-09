@@ -91,9 +91,6 @@ class IMAPManager:
             True if successful, False otherwise
         """
         try:
-            # Get the current folder
-            current_folder = client.selected_folder
-            
             # Ensure target folder exists
             self.ensure_folder_exists(client, target_folder)
             
@@ -134,20 +131,10 @@ class IMAPManager:
                     # Remove the Seen flag to keep it unread
                     client.remove_flags(messages, [b'\\Seen'])
                     logger.info(f"Preserved unread status for {len(messages)} emails in {target_folder}")
-                
-                # Return to the original folder
-                if current_folder:
-                    client.select_folder(current_folder)
             
             return True
         except Exception as e:
             logger.error(f"Error moving email {msg_id} to {target_folder}: {e}")
-            # Try to return to the original folder
-            try:
-                if current_folder:
-                    client.select_folder(current_folder)
-            except:
-                pass
             return False
     
     def get_emails(
