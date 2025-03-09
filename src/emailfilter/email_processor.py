@@ -347,6 +347,11 @@ class EmailProcessor:
                             else:
                                 logger.info(f"No unprocessed emails found in {folder}")
                             
+                            # Get the current message count before IDLE
+                            pre_idle_messages = client.search(['ALL'])
+                            pre_idle_count = len(pre_idle_messages)
+                            logger.info(f"Current message count before IDLE: {pre_idle_count}")
+                            
                             # Now enter IDLE mode to wait for new emails
                             logger.info(f"Waiting for new emails in {folder}")
                             client.idle()
@@ -355,43 +360,62 @@ class EmailProcessor:
                             responses = client.idle_check(timeout=self.config_manager.options.idle_timeout)
                             client.idle_done()
                             
+                            # Log all responses for debugging
+                            logger.info(f"IDLE responses: {responses}")
+                            
                             # Check if we received new emails
                             has_new_emails = False
                             for response in responses:
                                 if response[1] == b'EXISTS':
                                     has_new_emails = True
+                                    logger.info(f"Detected new email: {response}")
                                     break
                             
-                            if has_new_emails:
-                                # Get new emails
-                                emails = self.imap_manager.get_emails(
-                                    client, 
-                                    folder, 
-                                    self.config_manager.options.max_emails_per_run
+                            # Double-check by comparing message counts
+                            post_idle_messages = client.search(['ALL'])
+                            post_idle_count = len(post_idle_messages)
+                            logger.info(f"Message count after IDLE: {post_idle_count}")
+                            
+                            if post_idle_count > pre_idle_count:
+                                logger.info(f"New messages detected: {post_idle_count - pre_idle_count}")
+                                has_new_emails = True
+                            
+                            # Always check for new emails after IDLE, even if no EXISTS notification
+                            # This helps catch emails that might have been missed
+                            logger.info(f"Checking for new emails after IDLE (has_new_emails={has_new_emails})")
+                            
+                            # Get all emails again
+                            emails = self.imap_manager.get_emails(
+                                client, 
+                                folder, 
+                                self.config_manager.options.max_emails_per_run
+                            )
+                            
+                            # Filter out already processed emails
+                            unprocessed_emails = {}
+                            for msg_id, email_obj in emails.items():
+                                if not self.state_manager.is_email_processed(account.name, email_obj):
+                                    unprocessed_emails[msg_id] = email_obj
+                            
+                            if unprocessed_emails:
+                                logger.info(f"Found {len(unprocessed_emails)} unprocessed emails after IDLE")
+                                # Categorize emails
+                                categorized_emails = self.categorize_emails(
+                                    client,
+                                    unprocessed_emails,
+                                    account,
+                                    self.config_manager.options.batch_size
                                 )
                                 
-                                # Filter out already processed emails
-                                unprocessed_emails = {}
-                                for msg_id, email_obj in emails.items():
-                                    if not self.state_manager.is_email_processed(account.name, email_obj):
-                                        unprocessed_emails[msg_id] = email_obj
-                                
-                                if unprocessed_emails:
-                                    # Categorize emails
-                                    categorized_emails = self.categorize_emails(
-                                        client,
-                                        unprocessed_emails,
-                                        account,
-                                        self.config_manager.options.batch_size
-                                    )
-                                    
-                                    # Process categorized emails
-                                    self.process_categorized_emails(
-                                        client,
-                                        categorized_emails,
-                                        account,
-                                        folder
-                                    )
+                                # Process categorized emails
+                                self.process_categorized_emails(
+                                    client,
+                                    categorized_emails,
+                                    account,
+                                    folder
+                                )
+                            else:
+                                logger.info(f"No unprocessed emails found after IDLE")
                         except Exception as e:
                             logger.error(f"Error monitoring folder {folder}: {e}")
                             time.sleep(60)  # Wait before retrying

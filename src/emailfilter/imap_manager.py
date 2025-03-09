@@ -159,14 +159,20 @@ class IMAPManager:
             messages = client.search(['ALL'])
             logger.info(f"Found {len(messages)} emails in {folder}")
             
-            # Limit the number of emails
+            # Sort messages by ID (higher IDs are more recent)
+            messages.sort(reverse=True)
+            
+            # Limit the number of emails (most recent first)
             if max_emails > 0 and len(messages) > max_emails:
+                logger.info(f"Limiting to {max_emails} most recent emails")
                 messages = messages[:max_emails]
             
             # Fetch email data
             if not messages:
+                logger.info(f"No messages to fetch from {folder}")
                 return {}
             
+            logger.info(f"Fetching {len(messages)} emails from {folder}")
             raw_emails = client.fetch(messages, ['ENVELOPE', 'BODY[]'])
             
             # Convert to Email objects
@@ -179,6 +185,7 @@ class IMAPManager:
                 except Exception as e:
                     logger.error(f"Error processing email {msg_id}: {e}")
             
+            logger.info(f"Successfully processed {len(emails)} emails from {folder}")
             return emails
         except Exception as e:
             logger.error(f"Error fetching emails from {folder}: {e}")
