@@ -1,4 +1,8 @@
-"""IMAP client for fetching and processing emails."""
+"""IMAP client for fetching and processing emails.
+
+DEPRECATED: This module is deprecated and will be removed in a future version.
+Please use the imap_manager module instead.
+"""
 
 import email
 import email.header
@@ -10,6 +14,7 @@ import signal
 import sys
 import threading
 import time
+import warnings
 from datetime import datetime, timedelta
 from email.message import Message
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -20,6 +25,14 @@ from imapclient import IMAPClient
 from emailfilter import categorizer
 from .sqlite_state_manager import SQLiteStateManager
 from .models import Email as EmailModel
+
+# Issue a deprecation warning
+warnings.warn(
+    "The imap_client module is deprecated and will be removed in a future version. "
+    "Please use the imap_manager module instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 # Configure logging
 logging.basicConfig(

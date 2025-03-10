@@ -6,7 +6,10 @@ import sys
 from typing import Dict, List
 from pprint import pprint
 
-from emailfilter import imap_client
+# Use the new email_processor module instead of the deprecated imap_client
+from emailfilter.email_processor import EmailProcessor
+from emailfilter.models import EmailAccount
+from emailfilter.categorizer import EmailCategory
 
 # Get the directory of this script
 script_dir: str = os.path.dirname(os.path.abspath(__file__))
@@ -31,18 +34,18 @@ print("=" * 50)
 print(f"Using configuration file: {config_path}")
 
 # Create the email processor
-processor: imap_client.EmailProcessor = imap_client.EmailProcessor(config_path)
+processor = EmailProcessor(config_path)
 
 # Print account information
 print("\nConfigured Accounts:")
-for i, account in enumerate(processor.accounts, 1):
-    print(f"{i}. {account.name} ({account.email_address})")
+for i, account in enumerate(processor.config_manager.accounts, 1):
+    print(f"{i}. {account.name} ({account.email})")
     print(f"   Server: {account.imap_server}:{account.imap_port}")
     print(f"   Folders: {', '.join(account.folders)}")
 
 # Print processing options
 print("\nProcessing Options:")
-for option, value in processor.options.items():
+for option, value in vars(processor.config_manager.options).items():
     print(f"- {option}: {value}")
 
 # Ask for confirmation before proceeding
@@ -55,7 +58,7 @@ if response.lower() != "y":
 
 # Process all accounts
 print("\nProcessing accounts...")
-results: Dict[str, Dict[str, Dict[imap_client.categorizer.EmailCategory, int]]] = processor.process_all_accounts()
+results = processor.process_all_accounts()
 
 # Print summary
 print("\nEmail Processing Summary:")

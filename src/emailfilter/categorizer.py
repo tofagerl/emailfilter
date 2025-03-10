@@ -7,6 +7,7 @@ import json
 from enum import Enum, auto
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union, Any
+import warnings
 
 import openai
 from openai import OpenAI
@@ -302,6 +303,9 @@ def cleanup_old_logs(max_age_days: int = 7) -> int:
 
 def categorize_email(email: Dict[str, str]) -> EmailCategory:
     """
+    DEPRECATED: This function is deprecated and will be removed in a future version.
+    Please use batch_categorize_emails_for_account instead.
+    
     Categorize a single email using OpenAI API.
     
     Args:
@@ -309,12 +313,13 @@ def categorize_email(email: Dict[str, str]) -> EmailCategory:
         
     Returns:
         EmailCategory: The predicted category for the email
-        
-    Note:
-        This function is deprecated and will be removed in a future version.
-        Use batch_categorize_emails_for_account instead.
     """
-    logger.warning("categorize_email is deprecated, use batch_categorize_emails_for_account instead")
+    warnings.warn(
+        "categorize_email is deprecated and will be removed in a future version. "
+        "Please use batch_categorize_emails_for_account instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
     # Ensure API key is loaded
     global client
@@ -408,7 +413,11 @@ def batch_categorize_emails(
     emails: List[Dict[str, str]], 
     batch_size: int = 10
 ) -> List[Dict[str, Any]]:
-    """Categorize a batch of emails.
+    """
+    DEPRECATED: This function is deprecated and will be removed in a future version.
+    Please use batch_categorize_emails_for_account instead.
+    
+    Categorize a batch of emails.
     
     Args:
         emails: List of email dictionaries
@@ -416,12 +425,13 @@ def batch_categorize_emails(
         
     Returns:
         List of dictionaries with categorization results
-        
-    Note:
-        This function is deprecated and will be removed in a future version.
-        Use batch_categorize_emails_for_account instead.
     """
-    logger.warning("batch_categorize_emails is deprecated, use batch_categorize_emails_for_account instead")
+    warnings.warn(
+        "batch_categorize_emails is deprecated and will be removed in a future version. "
+        "Please use batch_categorize_emails_for_account instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
     results = []
     
@@ -447,7 +457,11 @@ def categorize_and_filter(
     emails: List[Dict[str, str]],
     categories=None
 ) -> Dict[EmailCategory, List[Dict[str, str]]]:
-    """Categorize emails and filter them by category.
+    """
+    DEPRECATED: This function is deprecated and will be removed in a future version.
+    Please use batch_categorize_emails_for_account with per-account categories instead.
+    
+    Categorize emails and filter them by category.
     
     Args:
         emails: List of email dictionaries
@@ -455,11 +469,13 @@ def categorize_and_filter(
         
     Returns:
         Dict[EmailCategory, List[Dict]]: Dictionary mapping categories to lists of emails
-        
-    Note:
-        This function is deprecated and will be removed in a future version.
     """
-    logger.warning("categorize_and_filter is deprecated")
+    warnings.warn(
+        "categorize_and_filter is deprecated and will be removed in a future version. "
+        "Please use batch_categorize_emails_for_account with per-account categories instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
     # Initialize result dictionary
     result = {category: [] for category in EmailCategory}

@@ -32,11 +32,4 @@ def filter_emails(
         if matches:
             filtered_emails.append(email)
     
-    return filtered_emails
-
-
-def process_emails() -> None:
-    """Example function to demonstrate email processing."""
-    print("Processing emails...")
-    # Implementation would go here
-    print("Email processing complete.") 
+    return filtered_emails 

@@ -5,7 +5,8 @@ import os
 import sys
 import time
 
-from emailfilter import imap_client
+# Use the new email_processor module instead of the deprecated imap_client
+from emailfilter.email_processor import EmailProcessor
 
 # Get the directory of this script
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,24 +31,24 @@ print("=" * 50)
 print(f"Using configuration file: {config_path}")
 
 # Create the email processor
-processor = imap_client.EmailProcessor(config_path)
+processor = EmailProcessor(config_path)
 
 # Print account information
 print("\nConfigured Accounts:")
-for i, account in enumerate(processor.accounts, 1):
-    print(f"{i}. {account.name} ({account.email_address})")
+for i, account in enumerate(processor.config_manager.accounts, 1):
+    print(f"{i}. {account.name} ({account.email})")
     print(f"   Server: {account.imap_server}:{account.imap_port}")
     print(f"   Folders: {', '.join(account.folders)}")
 
 # Print daemon options
 print("\nDaemon Options:")
-print(f"- IDLE Timeout: {processor.idle_timeout} seconds")
-print(f"- Reconnect Delay: {processor.reconnect_delay} seconds")
+print(f"- IDLE Timeout: {processor.config_manager.options.idle_timeout} seconds")
+print(f"- Max Emails Per Run: {processor.config_manager.options.max_emails_per_run}")
 
 # Print processing options
 print("\nProcessing Options:")
-for option, value in processor.options.items():
-    if option not in ["idle_timeout", "reconnect_delay"]:
+for option, value in vars(processor.config_manager.options).items():
+    if option not in ["idle_timeout", "max_emails_per_run"]:
         print(f"- {option}: {value}")
 
 # Ask for confirmation before proceeding

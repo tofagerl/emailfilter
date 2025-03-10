@@ -47,6 +47,13 @@ print(f"Total: {len(jane_emails)}")
 pprint(jane_emails)
 print("-" * 50)
 
+# Example function moved from filter.py
+def process_emails() -> None:
+    """Example function to demonstrate email processing."""
+    print("Processing emails...")
+    # Implementation would go here
+    print("Email processing complete.")
+
 # Demonstrate the process_emails function
 print("\nDemonstrating process_emails function:")
-filter.process_emails() 
+process_emails() 
