@@ -32,34 +32,53 @@ logger.addHandler(file_handler)
 # Global client
 client = None
 
-def load_api_key(config_path: str = "config.yaml") -> None:
-    """Load OpenAI API key from config file.
+def initialize_openai_client(api_key: str = None, config_path: str = None) -> None:
+    """Initialize the OpenAI client with an API key.
     
     Args:
-        config_path: Path to the config file
-    """
-    try:
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+        api_key: The OpenAI API key (optional)
+        config_path: Path to a config file containing the API key (optional)
         
-        api_key = config.get("openai_api_key")
-        if not api_key:
-            raise ValueError("OpenAI API key not found in config file")
-        
-        set_api_key(api_key)
-    except Exception as e:
-        logger.error(f"Error loading API key: {e}")
-        raise
-
-def set_api_key(api_key: str) -> None:
-    """Set the OpenAI API key.
-    
-    Args:
-        api_key: The OpenAI API key
+    Raises:
+        ValueError: If neither api_key nor config_path is provided, or if the API key is not found
     """
     global client
-    client = OpenAI(api_key=api_key)
-    logger.info("OpenAI API key set")
+    
+    # If API key is provided directly, use it
+    if api_key:
+        client = OpenAI(api_key=api_key)
+        logger.info("OpenAI client initialized with provided API key")
+        return
+    
+    # If config path is provided, try to load the API key from it
+    if config_path:
+        try:
+            with open(config_path, "r") as f:
+                config = yaml.safe_load(f)
+            
+            config_api_key = config.get("openai_api_key")
+            if not config_api_key:
+                raise ValueError("OpenAI API key not found in config file")
+            
+            client = OpenAI(api_key=config_api_key)
+            logger.info("OpenAI client initialized with API key from config file")
+            return
+        except Exception as e:
+            logger.error(f"Error loading API key from config: {e}")
+            raise
+    
+    # Try to get API key from environment variable
+    env_api_key = os.environ.get("OPENAI_API_KEY")
+    if env_api_key:
+        client = OpenAI(api_key=env_api_key)
+        logger.info("OpenAI client initialized with API key from environment variable")
+        return
+    
+    # If we get here, we couldn't initialize the client
+    raise ValueError(
+        "Could not initialize OpenAI client. Please provide an API key directly, "
+        "through a config file, or set the OPENAI_API_KEY environment variable."
+    )
 
 def log_openai_interaction(email: Dict[str, str], prompt: str, response: str, category_result: str) -> None:
     """Log OpenAI API interaction for debugging.
@@ -118,6 +137,11 @@ def batch_categorize_emails_for_account(
     """
     if not emails:
         return []
+    
+    # Ensure OpenAI client is initialized
+    global client
+    if not client:
+        raise ValueError("OpenAI client not initialized. Call initialize_openai_client() first.")
     
     # Get all available categories for this account
     categories = account.categories
@@ -296,201 +320,4 @@ def cleanup_old_logs(max_age_days: int = 7) -> int:
         return deleted_count
     except Exception as e:
         logger.error(f"Error cleaning up old logs: {e}")
-        return 0
-
-# The following functions are kept for backward compatibility with tests and examples
-# They are deprecated and will be removed in a future version
-
-def categorize_email(email: Dict[str, str]) -> EmailCategory:
-    """
-    DEPRECATED: This function is deprecated and will be removed in a future version.
-    Please use batch_categorize_emails_for_account instead.
-    
-    Categorize a single email using OpenAI API.
-    
-    Args:
-        email: Email dictionary with keys like 'subject', 'from', 'body', etc.
-        
-    Returns:
-        EmailCategory: The predicted category for the email
-    """
-    warnings.warn(
-        "categorize_email is deprecated and will be removed in a future version. "
-        "Please use batch_categorize_emails_for_account instead.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    
-    # Ensure API key is loaded
-    global client
-    if not client:
-        logger.debug("API key not set, loading from environment")
-        load_api_key()
-    
-    # Prepare the email content for the API
-    email_content = f"""
-    From: {email.get('from', 'Unknown')}
-    To: {email.get('to', 'Unknown')}
-    Subject: {email.get('subject', 'No Subject')}
-    Date: {email.get('date', 'Unknown')}
-    
-    {email.get('body', 'No Body')}
-    """
-    
-    # Define the prompt for the API
-    prompt = f"""
-    Categorize the following email into exactly one of these categories:
-    - Spam: Unwanted, unsolicited emails that might be scams or junk
-    - Receipts: Transaction confirmations, receipts, order updates
-    - Promotions: Marketing emails, newsletters, offers, discounts
-    - Updates: Non-urgent notifications, social media updates, news
-    - Inbox: Important emails that need attention or quick response
-    
-    Email:
-    {email_content}
-    
-    Category:
-    """
-    
-    logger.info(f"Categorizing email: {email.get('subject', 'No Subject')}")
-    
-    try:
-        # Call the OpenAI API with GPT-4o-mini
-        logger.debug("Sending request to OpenAI API")
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Using GPT-4o-mini for efficient categorization
-            messages=[
-                {"role": "system", "content": "You are an email categorization assistant. Categorize the email into exactly one of the specified categories."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=10,
-            temperature=0.2  # Lower temperature for more consistent results
-        )
-        
-        # Extract and parse the category from the response
-        category_text = response.choices[0].message.content.strip().upper()
-        logger.info(f"OpenAI categorized email as: {category_text}")
-        
-        # Map the response to our enum
-        category_map = {
-            "SPAM": EmailCategory.SPAM,
-            "RECEIPTS": EmailCategory.RECEIPTS,
-            "PROMOTIONS": EmailCategory.PROMOTIONS,
-            "UPDATES": EmailCategory.UPDATES,
-            "INBOX": EmailCategory.INBOX
-        }
-        
-        # Default to INBOX if the response doesn't match any category
-        category = EmailCategory.INBOX
-        for key, value in category_map.items():
-            if key in category_text:
-                category = value
-                break
-        
-        # Log the interaction
-        log_openai_interaction(
-            email=email,
-            prompt=prompt,
-            response=response.choices[0].message.content,
-            category_result=category.name
-        )
-        
-        return category
-    
-    except Exception as e:
-        logger.error(f"Error categorizing email: {e}")
-        # Log the error
-        log_openai_interaction(
-            email=email,
-            prompt=prompt,
-            response=f"ERROR: {str(e)}",
-            category_result="ERROR"
-        )
-        # Default to INBOX for errors
-        return EmailCategory.INBOX
-
-def batch_categorize_emails(
-    emails: List[Dict[str, str]], 
-    batch_size: int = 10
-) -> List[Dict[str, Any]]:
-    """
-    DEPRECATED: This function is deprecated and will be removed in a future version.
-    Please use batch_categorize_emails_for_account instead.
-    
-    Categorize a batch of emails.
-    
-    Args:
-        emails: List of email dictionaries
-        batch_size: Maximum number of emails to categorize in one batch
-        
-    Returns:
-        List of dictionaries with categorization results
-    """
-    warnings.warn(
-        "batch_categorize_emails is deprecated and will be removed in a future version. "
-        "Please use batch_categorize_emails_for_account instead.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    
-    results = []
-    
-    for email in emails[:batch_size]:
-        try:
-            category = categorize_email(email)
-            results.append({
-                "category": category.name.lower(),
-                "confidence": 90,
-                "reasoning": "Categorized using legacy function"
-            })
-        except Exception as e:
-            logger.error(f"Error categorizing email: {e}")
-            results.append({
-                "category": "inbox",
-                "confidence": 0,
-                "reasoning": f"Error: {str(e)}"
-            })
-    
-    return results
-
-def categorize_and_filter(
-    emails: List[Dict[str, str]],
-    categories=None
-) -> Dict[EmailCategory, List[Dict[str, str]]]:
-    """
-    DEPRECATED: This function is deprecated and will be removed in a future version.
-    Please use batch_categorize_emails_for_account with per-account categories instead.
-    
-    Categorize emails and filter them by category.
-    
-    Args:
-        emails: List of email dictionaries
-        categories: Optional list of categories to filter by
-        
-    Returns:
-        Dict[EmailCategory, List[Dict]]: Dictionary mapping categories to lists of emails
-    """
-    warnings.warn(
-        "categorize_and_filter is deprecated and will be removed in a future version. "
-        "Please use batch_categorize_emails_for_account with per-account categories instead.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    
-    # Initialize result dictionary
-    result = {category: [] for category in EmailCategory}
-    
-    # Categorize each email
-    for email in emails:
-        try:
-            category = categorize_email(email)
-            
-            # Filter by categories if specified
-            if categories is None or category in categories:
-                result[category].append(email)
-        except Exception as e:
-            logger.error(f"Error categorizing email: {e}")
-            # Add to INBOX on error
-            result[EmailCategory.INBOX].append(email)
-    
-    return result 
+        return 0 

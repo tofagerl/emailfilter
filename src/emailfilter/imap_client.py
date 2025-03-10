@@ -1,7 +1,10 @@
-"""IMAP client for fetching and processing emails.
+"""
+DEPRECATED MODULE: This module is deprecated and will be removed in a future version.
 
-DEPRECATED: This module is deprecated and will be removed in a future version.
-Please use the imap_manager module instead.
+Please use the email_processor module instead, which provides a more robust and
+maintainable implementation with better error handling and configuration options.
+
+This module is kept for backward compatibility only and should not be used in new code.
 """
 
 import email
@@ -26,10 +29,13 @@ from emailfilter import categorizer
 from .sqlite_state_manager import SQLiteStateManager
 from .models import Email as EmailModel
 
-# Issue a deprecation warning
+# Issue a prominent deprecation warning that will always be shown
 warnings.warn(
-    "The imap_client module is deprecated and will be removed in a future version. "
-    "Please use the imap_manager module instead.",
+    "\n"
+    "=============================================================================\n"
+    "DEPRECATED MODULE: The imap_client module is deprecated and will be removed\n"
+    "in a future version. Please use the email_processor module instead.\n"
+    "=============================================================================\n",
     DeprecationWarning,
     stacklevel=2
 )
@@ -113,10 +119,11 @@ class EmailProcessor:
         """Load configuration from YAML file."""
         try:
             with open(self.config_path, "r") as f:
-                config = yaml.safe_load(f)
-
+                self.config = yaml.safe_load(f)
+            
             # Load accounts
-            for account_config in config.get("accounts", []):
+            accounts_config = self.config.get("accounts", [])
+            for account_config in accounts_config:
                 account = EmailAccount(
                     name=account_config.get("name", ""),
                     email_address=account_config.get("email", ""),
@@ -124,14 +131,23 @@ class EmailProcessor:
                     imap_server=account_config.get("imap_server", ""),
                     imap_port=account_config.get("imap_port", 993),
                     ssl=account_config.get("ssl", True),
-                    folders=account_config.get("folders", ["INBOX"]),
+                    folders=account_config.get("folders", ["INBOX"])
                 )
                 self.accounts.append(account)
-
+            
             # Load options
-            self.options = config.get("options", {})
-
-            logger.info(f"Loaded configuration with {len(self.accounts)} accounts")
+            options_config = self.config.get("options", {})
+            self.move_emails = options_config.get("move_emails", True)
+            self.category_folders = options_config.get("category_folders", {})
+            self.idle_timeout = options_config.get("idle_timeout", 1740)  # 29 minutes
+            self.reconnect_delay = options_config.get("reconnect_delay", 5)
+            self.max_emails_per_run = options_config.get("max_emails_per_run", 100)
+            
+            # Initialize OpenAI client
+            categorizer.initialize_openai_client(config_path=self.config_path)
+            
+            logger.info(f"Loaded configuration from {self.config_path}")
+            logger.info(f"Loaded {len(self.accounts)} accounts")
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
             raise
@@ -634,6 +650,96 @@ class EmailProcessor:
             "date": date,
             "body": body
         }
+
+    def _process_emails_for_account(self, account: EmailAccount, max_emails: int = 100) -> Dict[str, Dict[str, int]]:
+        """Process emails for a single account.
+        
+        Args:
+            account: The email account to process
+            max_emails: Maximum number of emails to process
+            
+        Returns:
+            Dictionary mapping folders to dictionaries mapping categories to counts
+        """
+        logger.info(f"Processing emails for account: {account.name}")
+        
+        # Connect to the account
+        client = self.connect_to_account(account)
+        if not client:
+            logger.error(f"Failed to connect to account: {account.name}")
+            return {}
+        
+        results = {}
+        
+        try:
+            # Process each folder
+            for folder in account.folders:
+                logger.info(f"Processing folder: {folder}")
+                
+                # Select the folder
+                client.select_folder(folder)
+                
+                # Fetch unprocessed emails
+                emails = self.fetch_unprocessed_emails(account, max_emails)
+                if not emails:
+                    logger.info(f"No unprocessed emails found in folder: {folder}")
+                    results[folder] = {}
+                    continue
+                
+                logger.info(f"Found {len(emails)} unprocessed emails in folder: {folder}")
+                
+                # Convert to list of dictionaries for categorization
+                email_list = []
+                for msg_id, email_data in emails.items():
+                    email_info = self._extract_email_info(email_data[b"RFC822"])
+                    email_list.append(email_info)
+                
+                # Create a mock account with default categories for categorization
+                mock_account = EmailAccount(
+                    name="Temp",
+                    email_address="temp@example.com",
+                    password="",
+                    imap_server="",
+                    categories=[
+                        categorizer.Category("SPAM", "Unwanted emails", self.category_folders.get("spam", "[Spam]")),
+                        categorizer.Category("RECEIPTS", "Order confirmations", self.category_folders.get("receipts", "[Receipts]")),
+                        categorizer.Category("PROMOTIONS", "Marketing emails", self.category_folders.get("promotions", "[Promotions]")),
+                        categorizer.Category("UPDATES", "Notifications", self.category_folders.get("updates", "[Updates]")),
+                        categorizer.Category("INBOX", "Important emails", self.category_folders.get("inbox", "INBOX"))
+                    ]
+                )
+                
+                # Categorize emails
+                batch_size = min(10, len(email_list))
+                categorization_results = categorizer.batch_categorize_emails_for_account(
+                    email_list, mock_account, batch_size
+                )
+                
+                # Group emails by category
+                categorized_emails = {}
+                for i, email in enumerate(email_list):
+                    if i < len(categorization_results):
+                        category = categorization_results[i]["category"]
+                        if category not in categorized_emails:
+                            categorized_emails[category] = []
+                        categorized_emails[category].append(email)
+                
+                # Process categorized emails
+                category_counts = self.process_categorized_emails(
+                    client, account.name, categorized_emails, self.category_folders, self.move_emails
+                )
+                
+                results[folder] = category_counts
+        except Exception as e:
+            logger.error(f"Error processing emails for account {account.name}: {e}")
+        finally:
+            # Logout and close the connection
+            try:
+                client.logout()
+            except Exception as e:
+                logger.error(f"Error logging out: {e}")
+        
+        return results
 
 
 def main(config_path: str, daemon_mode: bool = False) -> None:

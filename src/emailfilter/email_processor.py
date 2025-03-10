@@ -39,12 +39,12 @@ class EmailProcessor:
         # Set up IMAP manager
         self.imap_manager = IMAPManager()
         
-        # Set OpenAI API key
+        # Initialize OpenAI client
         try:
-            categorizer.set_api_key(self.config_manager.openai_api_key)
-            logger.info("OpenAI API key loaded successfully")
+            categorizer.initialize_openai_client(api_key=self.config_manager.openai_api_key)
+            logger.info("OpenAI client initialized successfully")
         except Exception as e:
-            logger.error(f"Error loading OpenAI API key: {e}")
+            logger.error(f"Error initializing OpenAI client: {e}")
             raise
     
     def categorize_emails(

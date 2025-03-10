@@ -36,11 +36,11 @@ def handle_categorize_command(args):
         with open(args.input, "r") as f:
             emails = json.load(f)
         
-        # Load API key from config
+        # Initialize OpenAI client from config
         try:
-            categorizer.load_api_key(args.config)
+            categorizer.initialize_openai_client(config_path=args.config)
         except Exception as e:
-            logger.error(f"Error loading API key: {e}")
+            logger.error(f"Error initializing OpenAI client: {e}")
             sys.exit(1)
         
         # Clean up old logs if requested

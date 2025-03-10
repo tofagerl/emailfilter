@@ -116,27 +116,38 @@ filtered = filter.filter_emails(emails, {"from": "example.com"})
 
 ```python
 from emailfilter import categorizer
+from emailfilter.models import EmailAccount, EmailCategory
 
-# Categorize a single email
-email = {
-    "from": "shop@example.com",
-    "to": "user@gmail.com",
-    "subject": "Your order has shipped",
-    "body": "Your recent order #12345 has shipped and will arrive tomorrow."
-}
+# Initialize the OpenAI client
+categorizer.initialize_openai_client(api_key="your_openai_api_key")
+# Or initialize from a config file
+# categorizer.initialize_openai_client(config_path="config.yaml")
 
-category = categorizer.categorize_email(email)
-print(f"Email category: {category}")  # Likely "Receipts"
-
-# Batch categorize emails
-emails = [...]  # List of email dictionaries
-categorized = categorizer.batch_categorize_emails(emails)
-
-# Filter emails by category
-inbox_emails = categorizer.categorize_and_filter(
-    emails,
-    categories=[categorizer.EmailCategory.INBOX]
+# Create an account with categories
+account = EmailAccount(
+    name="Personal",
+    email="user@example.com",
+    password="password",
+    imap_server="imap.example.com",
+    categories=[
+        EmailCategory(name="SPAM", description="Unwanted emails", foldername="[Spam]"),
+        EmailCategory(name="RECEIPTS", description="Order confirmations", foldername="[Receipts]"),
+        EmailCategory(name="INBOX", description="Important emails", foldername="INBOX")
+    ]
 )
+
+# Batch categorize emails for a specific account
+emails = [
+    {
+        "from": "shop@example.com",
+        "to": "user@gmail.com",
+        "subject": "Your order has shipped",
+        "body": "Your recent order #12345 has shipped and will arrive tomorrow."
+    }
+]
+
+results = categorizer.batch_categorize_emails_for_account(emails, account)
+print(f"Email category: {results[0]['category']}")  # Likely "RECEIPTS"
 ```
 
 ### Command Line Interface
@@ -219,7 +230,7 @@ The application uses a YAML configuration file for IMAP accounts and processing 
 
 ```yaml
 # OpenAI API Key
-openai_api_key: "your_openai_api_key_here"
+openai_api_key: "your_openai_api_key"
 
 # Email Accounts
 accounts:
@@ -366,6 +377,64 @@ docker run -it --rm emailfilter pytest
 This application uses OpenAI's GPT-4o-mini model, which provides a good balance between quality and cost for email categorization. It's more efficient than GPT-4 while still delivering accurate results for this specific task.
 
 When running in daemon mode, the application will make API calls whenever new emails arrive, so be mindful of your API usage and costs.
+
+## API Changes and Deprecations
+
+The codebase has undergone significant improvements to enhance maintainability and performance. As a result, some older APIs have been deprecated:
+
+### Deprecated Modules
+
+- **`imap_client.py`**: This module is deprecated and will be removed in a future version. Use `email_processor.py` instead, which provides a more robust implementation with better error handling and configuration options.
+
+### Deprecated Functions
+
+The following functions in `categorizer.py` have been removed:
+
+- **`load_api_key()`**: Replaced by `initialize_openai_client()`
+- **`set_api_key()`**: Replaced by `initialize_openai_client()`
+- **`categorize_email()`**: Replaced by `batch_categorize_emails_for_account()`
+- **`batch_categorize_emails()`**: Replaced by `batch_categorize_emails_for_account()`
+- **`categorize_and_filter()`**: Replaced by `batch_categorize_emails_for_account()` with per-account categories
+
+### New APIs
+
+- **`initialize_openai_client(api_key=None, config_path=None)`**: Initialize the OpenAI client with an API key provided directly, from a config file, or from the environment variable `OPENAI_API_KEY`.
+- **`batch_categorize_emails_for_account(emails, account, batch_size=10, model="gpt-4o-mini")`**: Categorize a batch of emails for a specific account, using the account's category definitions.
+
+### Migration Guide
+
+If you're using the deprecated functions, here's how to migrate to the new APIs:
+
+```python
+# Old code
+from emailfilter import categorizer
+categorizer.load_api_key("config.yaml")
+category = categorizer.categorize_email(email)
+
+# New code
+from emailfilter import categorizer
+from emailfilter.models import EmailAccount, EmailCategory
+
+# Initialize the client
+categorizer.initialize_openai_client(config_path="config.yaml")
+
+# Create an account with categories
+account = EmailAccount(
+    name="Personal",
+    email="user@example.com",
+    password="password",
+    imap_server="imap.example.com",
+    categories=[
+        EmailCategory(name="SPAM", description="Unwanted emails", foldername="[Spam]"),
+        EmailCategory(name="RECEIPTS", description="Order confirmations", foldername="[Receipts]"),
+        EmailCategory(name="INBOX", description="Important emails", foldername="INBOX")
+    ]
+)
+
+# Categorize emails
+results = categorizer.batch_categorize_emails_for_account([email], account)
+category = results[0]["category"]
+```
 
 ## License
 
