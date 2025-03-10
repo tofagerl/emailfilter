@@ -140,7 +140,7 @@ class IMAPManager:
     def get_emails(
         self, client: IMAPClient, folder: str, max_emails: int
     ) -> Dict[int, Email]:
-        """Get all emails from a folder.
+        """Get all emails from a folder without marking them as read.
         
         Args:
             client: The IMAPClient object
@@ -173,19 +173,21 @@ class IMAPManager:
                 return {}
             
             logger.info(f"Fetching {len(messages)} emails from {folder}")
-            raw_emails = client.fetch(messages, ['ENVELOPE', 'BODY[]'])
+            # Use BODY.PEEK[] instead of BODY[] to avoid marking emails as read
+            raw_emails = client.fetch(messages, ['ENVELOPE', 'BODY.PEEK[]'])
             
             # Convert to Email objects
             emails = {}
             for msg_id, data in raw_emails.items():
                 try:
-                    message = email.message_from_bytes(data[b'BODY[]'])
+                    # The key is now 'BODY.PEEK[]' instead of 'BODY[]'
+                    message = email.message_from_bytes(data[b'BODY.PEEK[]'])
                     emails[msg_id] = Email.from_message(message, msg_id)
                     emails[msg_id].folder = folder
                 except Exception as e:
                     logger.error(f"Error processing email {msg_id}: {e}")
             
-            logger.info(f"Successfully processed {len(emails)} emails from {folder}")
+            logger.info(f"Successfully processed {len(emails)} emails from {folder} without marking as read")
             return emails
         except Exception as e:
             logger.error(f"Error fetching emails from {folder}: {e}")
