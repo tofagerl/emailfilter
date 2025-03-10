@@ -118,6 +118,175 @@ def log_openai_interaction(email: Dict[str, str], prompt: str, response: str, ca
     except Exception as e:
         logger.error(f"Error logging interaction: {e}")
 
+def prepare_category_info(account) -> List[Dict[str, str]]:
+    """Extract category information from an account.
+    
+    Args:
+        account: The EmailAccount object with category definitions
+        
+    Returns:
+        List of dictionaries with category information
+    """
+    categories = account.categories
+    category_info = []
+    for category in categories:
+        category_info.append({
+            "name": category.name,
+            "description": category.description,
+            "folder": category.foldername
+        })
+    return category_info
+
+def create_system_prompt(category_info: List[Dict[str, str]], categories) -> str:
+    """Create the system prompt for the OpenAI API.
+    
+    Args:
+        category_info: List of dictionaries with category information
+        categories: List of Category objects
+        
+    Returns:
+        System prompt string
+    """
+    return f"""You are an email categorization assistant. Your task is to categorize emails into one of the following categories:
+
+{json.dumps(category_info, indent=2)}
+
+For each email, respond with a JSON object containing:
+1. "category": The category name (must be one of: {', '.join([c.name for c in categories])})
+2. "confidence": Your confidence level (0-100)
+3. "reasoning": Brief explanation of your categorization
+
+Analyze the email's subject, sender, and content to determine the most appropriate category.
+Use the category descriptions to guide your decision.
+"""
+
+def create_user_prompt(emails: List[Dict[str, str]], batch_size: int) -> str:
+    """Create the user prompt for the OpenAI API.
+    
+    Args:
+        emails: List of email dictionaries
+        batch_size: Maximum number of emails to include
+        
+    Returns:
+        User prompt string
+    """
+    user_prompt = "Categorize the following emails:\n\n"
+    for i, email in enumerate(emails[:batch_size]):
+        user_prompt += f"Email {i+1}:\n"
+        user_prompt += f"From: {email.get('from', '')}\n"
+        user_prompt += f"To: {email.get('to', '')}\n"
+        user_prompt += f"Subject: {email.get('subject', '')}\n"
+        user_prompt += f"Date: {email.get('date', '')}\n"
+        user_prompt += f"Body: {email.get('body', '')[:1000]}...\n\n"
+    return user_prompt
+
+def call_openai_api(system_prompt: str, user_prompt: str, model: str) -> str:
+    """Call the OpenAI API with the given prompts.
+    
+    Args:
+        system_prompt: The system prompt
+        user_prompt: The user prompt
+        model: The OpenAI model to use
+        
+    Returns:
+        The response text from OpenAI
+        
+    Raises:
+        Exception: If there's an error calling the API
+    """
+    global client
+    if not client:
+        raise ValueError("OpenAI client not initialized. Call initialize_openai_client() first.")
+    
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.3,
+        max_tokens=1500,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0
+    )
+    
+    return response.choices[0].message.content
+
+def extract_json_objects(response_text: str) -> List[str]:
+    """Extract JSON objects from a text response.
+    
+    Args:
+        response_text: The text containing JSON objects
+        
+    Returns:
+        List of JSON object strings
+    """
+    import re
+    return re.findall(r'\{[^{}]*\}', response_text)
+
+def validate_and_normalize_category(result: Dict[str, Any], valid_categories: List[str]) -> Dict[str, Any]:
+    """Validate and normalize a category in a result.
+    
+    Args:
+        result: The result dictionary
+        valid_categories: List of valid category names (uppercase)
+        
+    Returns:
+        The validated and normalized result dictionary
+    """
+    # Ensure category is valid
+    if "category" in result:
+        category = result["category"].upper()
+        if category in valid_categories:
+            result["category"] = category
+        else:
+            # Default to INBOX if category is invalid
+            logger.warning(f"Invalid category: {category}, defaulting to INBOX")
+            result["category"] = "INBOX"
+    else:
+        result["category"] = "INBOX"
+    
+    return result
+
+def parse_openai_response(response_text: str, categories, batch_size: int) -> List[Dict[str, Any]]:
+    """Parse the OpenAI API response.
+    
+    Args:
+        response_text: The response text from OpenAI
+        categories: List of Category objects
+        batch_size: The batch size used for the request
+        
+    Returns:
+        List of dictionaries with categorization results
+    """
+    results = []
+    try:
+        # Extract JSON objects from response
+        json_objects = extract_json_objects(response_text)
+        
+        # Get valid category names (uppercase for case-insensitive comparison)
+        valid_categories = [c.name.upper() for c in categories]
+        
+        for json_obj in json_objects:
+            try:
+                result = json.loads(json_obj)
+                result = validate_and_normalize_category(result, valid_categories)
+                results.append(result)
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse JSON object: {json_obj}")
+                results.append({"category": "INBOX", "confidence": 0, "reasoning": "Failed to parse response"})
+    except Exception as e:
+        logger.error(f"Error parsing response: {e}")
+        # Fallback: create default results
+        results = [{"category": "INBOX", "confidence": 0, "reasoning": "Failed to parse response"}] * batch_size
+    
+    # Ensure we have a result for each email
+    while len(results) < batch_size:
+        results.append({"category": "INBOX", "confidence": 0, "reasoning": "Missing from response"})
+    
+    return results
+
 def batch_categorize_emails_for_account(
     emails: List[Dict[str, str]], 
     account,
@@ -138,115 +307,37 @@ def batch_categorize_emails_for_account(
     if not emails:
         return []
     
-    # Ensure OpenAI client is initialized
-    global client
-    if not client:
-        raise ValueError("OpenAI client not initialized. Call initialize_openai_client() first.")
-    
-    # Get all available categories for this account
-    categories = account.categories
-    category_info = []
-    for category in categories:
-        category_info.append({
-            "name": category.name,
-            "description": category.description,
-            "folder": category.foldername
-        })
-    
-    # Prepare system prompt
-    system_prompt = f"""You are an email categorization assistant. Your task is to categorize emails into one of the following categories:
-
-{json.dumps(category_info, indent=2)}
-
-For each email, respond with a JSON object containing:
-1. "category": The category name (must be one of: {', '.join([c.name for c in categories])})
-2. "confidence": Your confidence level (0-100)
-3. "reasoning": Brief explanation of your categorization
-
-Analyze the email's subject, sender, and content to determine the most appropriate category.
-Use the category descriptions to guide your decision.
-"""
-    
-    # Prepare user prompt
-    user_prompt = "Categorize the following emails:\n\n"
-    for i, email in enumerate(emails[:batch_size]):
-        user_prompt += f"Email {i+1}:\n"
-        user_prompt += f"From: {email.get('from', '')}\n"
-        user_prompt += f"To: {email.get('to', '')}\n"
-        user_prompt += f"Subject: {email.get('subject', '')}\n"
-        user_prompt += f"Date: {email.get('date', '')}\n"
-        user_prompt += f"Body: {email.get('body', '')[:1000]}...\n\n"
+    # Limit batch size to the number of emails
+    actual_batch_size = min(batch_size, len(emails))
     
     try:
-        # Call OpenAI API with the specified model
-        response = client.chat.completions.create(
-            model=model,  # Use the model from configuration
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,
-            max_tokens=1500,
-            top_p=1.0,
-            frequency_penalty=0.0,
-            presence_penalty=0.0
-        )
+        # Prepare category information
+        category_info = prepare_category_info(account)
         
-        # Parse response
-        response_text = response.choices[0].message.content
+        # Create prompts
+        system_prompt = create_system_prompt(category_info, account.categories)
+        user_prompt = create_user_prompt(emails, actual_batch_size)
+        
+        # Call OpenAI API
+        response_text = call_openai_api(system_prompt, user_prompt, model)
         
         # Log interaction for debugging
-        for i, email in enumerate(emails[:batch_size]):
+        for i, email in enumerate(emails[:actual_batch_size]):
             log_openai_interaction(
                 email, 
-                f"Batch categorization with {model} (email {i+1} of {len(emails[:batch_size])})", 
+                f"Batch categorization with {model} (email {i+1} of {actual_batch_size})", 
                 response_text, 
                 "See full response"
             )
         
-        # Extract JSON objects from response
-        results = []
-        try:
-            # Try to parse as a JSON array
-            import re
-            json_objects = re.findall(r'\{[^{}]*\}', response_text)
-            
-            # Get valid category names (uppercase for case-insensitive comparison)
-            valid_categories = [c.name.upper() for c in categories]
-            
-            for json_obj in json_objects:
-                try:
-                    result = json.loads(json_obj)
-                    # Ensure category is valid
-                    if "category" in result:
-                        category = result["category"].upper()
-                        if category in valid_categories:
-                            result["category"] = category
-                        else:
-                            # Default to INBOX if category is invalid
-                            logger.warning(f"Invalid category: {category}, defaulting to INBOX")
-                            result["category"] = "INBOX"
-                    else:
-                        result["category"] = "INBOX"
-                    
-                    results.append(result)
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse JSON object: {json_obj}")
-                    results.append({"category": "INBOX", "confidence": 0, "reasoning": "Failed to parse response"})
-        except Exception as e:
-            logger.error(f"Error parsing response: {e}")
-            # Fallback: create default results
-            results = [{"category": "INBOX", "confidence": 0, "reasoning": "Failed to parse response"}] * len(emails[:batch_size])
-        
-        # Ensure we have a result for each email
-        while len(results) < len(emails[:batch_size]):
-            results.append({"category": "INBOX", "confidence": 0, "reasoning": "Missing from response"})
+        # Parse response
+        results = parse_openai_response(response_text, account.categories, actual_batch_size)
         
         return results
     except Exception as e:
         logger.error(f"Error calling OpenAI API: {e}")
         # Fallback: categorize all as inbox
-        return [{"category": "INBOX", "confidence": 0, "reasoning": f"API error: {str(e)}"}] * len(emails[:batch_size])
+        return [{"category": "INBOX", "confidence": 0, "reasoning": f"API error: {str(e)}"}] * actual_batch_size
 
 # For backward compatibility with tests and examples
 # Default categories if not specified in config
