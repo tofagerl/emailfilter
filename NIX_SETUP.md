@@ -53,7 +53,7 @@ This project includes a Nix flake for setting up a reproducible development envi
    direnv allow
    ```
 
-   This will automatically set up the development environment using Nix.
+   This will automatically set up the development environment using Nix. The first time you run this, it may take several minutes as Nix downloads and builds all dependencies.
 
 3. Create a `.env` file with your OpenAI API key:
    ```bash
@@ -65,9 +65,9 @@ This project includes a Nix flake for setting up a reproducible development envi
 
 Once set up, the environment will automatically load whenever you enter the project directory. The environment includes:
 
-- Python 3.10 with all required dependencies
+- Python 3.11 with all required dependencies
 - Development tools (pytest, black, isort, mypy)
-- Virtual environment management with uv
+- Virtual environment management
 - Proper PYTHONPATH configuration
 
 ### Manual Usage (without direnv)
@@ -101,9 +101,48 @@ mypy src/
 
 ## Troubleshooting
 
-- **Nix environment not loading**: Make sure you have allowed direnv with `direnv allow`.
-- **Missing dependencies**: If you add new dependencies, update the `flake.nix` file.
-- **OpenAI API key not found**: Set it in your `.env` file or export it in your shell.
+### Common Issues
+
+- **"shell: command not found" error in .envrc**:
+  This is usually caused by direnv not recognizing the shell directive. The file has been updated to use a shebang instead.
+
+- **Python package compatibility issues**:
+  The flake now uses Python 3.11 instead of 3.10 to avoid compatibility issues with certain packages.
+
+- **"error: propcache-X.X.X not supported for interpreter pythonX.X"**:
+  This error occurs when a Python package is not compatible with the specified Python version. Try running `direnv reload` after the flake.nix has been updated.
+
+- **Virtual environment activation fails**:
+  The shell hook now includes error handling to recreate the virtual environment if activation fails.
+
+### General Troubleshooting Steps
+
+1. **Update the flake lock file**:
+
+   ```bash
+   nix flake update
+   ```
+
+2. **Reload the direnv environment**:
+
+   ```bash
+   direnv reload
+   ```
+
+3. **Clean up and rebuild**:
+
+   ```bash
+   rm -rf .direnv .venv
+   direnv allow
+   ```
+
+4. **Check Nix store for corruption**:
+
+   ```bash
+   nix-store --verify --check-contents
+   ```
+
+5. **OpenAI API key not found**: Set it in your `.env` file or export it in your shell.
 
 ## Benefits of Using Nix
 
@@ -111,3 +150,13 @@ mypy src/
 - **Isolated**: Dependencies don't interfere with your system packages.
 - **Declarative**: All dependencies are explicitly defined in `flake.nix`.
 - **Cross-platform**: Works on Linux, macOS, and WSL (Windows Subsystem for Linux).
+
+## Advanced Configuration
+
+### Customizing Python Packages
+
+If you need to add or modify Python packages, edit the `pythonEnv` definition in `flake.nix`. For packages with specific version requirements, you can use the `buildPythonPackage` function as shown with the OpenAI package.
+
+### Using a Different Python Version
+
+To use a different Python version, change the `python = pkgs.pythonXXX` line in `flake.nix`, where `XXX` is the version (e.g., `311` for Python 3.11).
