@@ -180,8 +180,24 @@ class IMAPManager:
             emails = {}
             for msg_id, data in raw_emails.items():
                 try:
-                    # The key is now 'BODY.PEEK[]' instead of 'BODY[]'
-                    message = email.message_from_bytes(data[b'BODY.PEEK[]'])
+                    # Check if the key exists in the data
+                    if b'BODY.PEEK[]' not in data:
+                        # Try alternative keys that might be returned by the server
+                        body_key = None
+                        for key in data.keys():
+                            if isinstance(key, bytes) and b'BODY' in key:
+                                body_key = key
+                                break
+                        
+                        if body_key is None:
+                            logger.error(f"No body data found for email {msg_id}. Available keys: {list(data.keys())}")
+                            continue
+                        
+                        message = email.message_from_bytes(data[body_key])
+                    else:
+                        # The key is present as expected
+                        message = email.message_from_bytes(data[b'BODY.PEEK[]'])
+                    
                     emails[msg_id] = Email.from_message(message, msg_id)
                     emails[msg_id].folder = folder
                 except Exception as e:
