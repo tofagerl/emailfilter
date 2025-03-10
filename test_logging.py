@@ -7,9 +7,10 @@ import logging
 from dotenv import load_dotenv
 
 from emailfilter.categorizer import (
-    set_api_key, categorize_email, categorize_email_with_custom_categories,
+    initialize_openai_client, batch_categorize_emails_for_account,
     cleanup_old_logs
 )
+from emailfilter.models import EmailAccount, Category
 
 # Configure logging
 logging.basicConfig(
@@ -29,8 +30,8 @@ def main():
         logger.error("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
         return
     
-    # Set the API key
-    set_api_key(api_key)
+    # Initialize the OpenAI client
+    initialize_openai_client(api_key=api_key)
     
     # Create a test email
     test_email = {
@@ -51,40 +52,68 @@ def main():
         """
     }
     
+    # Create an account with default categories
+    default_account = EmailAccount(
+        name="Test Account",
+        email_address="test@example.com",
+        password="password",
+        imap_server="imap.example.com",
+        categories=[
+            Category("SPAM", "Unwanted emails", "[Spam]"),
+            Category("RECEIPTS", "Order confirmations", "[Receipts]"),
+            Category("PROMOTIONS", "Marketing emails", "[Promotions]"),
+            Category("UPDATES", "Notifications", "[Updates]"),
+            Category("INBOX", "Important emails", "INBOX")
+        ]
+    )
+    
     # Test with default categories
     logger.info("Testing categorization with default categories")
-    category = categorize_email(test_email)
-    logger.info(f"Email categorized as: {category}")
+    results = batch_categorize_emails_for_account([test_email], default_account)
+    logger.info(f"Email categorized as: {results[0]['category']}")
     
     # Test with custom categories
     logger.info("Testing categorization with custom categories")
-    custom_categories = [
-        {"id": 1, "name": "SPAM", "description": "Unwanted, unsolicited emails that might be scams or junk"},
-        {"id": 2, "name": "MARKETING", "description": "Promotional emails, offers, and advertisements"},
-        {"id": 3, "name": "IMPORTANT", "description": "Critical emails that need immediate attention"},
-        {"id": 4, "name": "NEWSLETTERS", "description": "Regular updates and newsletters"},
-        {"id": 5, "name": "PERSONAL", "description": "Personal communications from friends and family"}
-    ]
+    custom_account = EmailAccount(
+        name="Custom Account",
+        email_address="custom@example.com",
+        password="password",
+        imap_server="imap.example.com",
+        categories=[
+            Category("SPAM", "Unwanted, unsolicited emails that might be scams or junk", "[Spam]"),
+            Category("MARKETING", "Promotional emails, offers, and advertisements", "[Marketing]"),
+            Category("IMPORTANT", "Critical emails that need immediate attention", "INBOX"),
+            Category("NEWSLETTERS", "Regular updates and newsletters", "[Newsletters]"),
+            Category("PERSONAL", "Personal communications from friends and family", "[Personal]")
+        ]
+    )
     
-    custom_category = categorize_email_with_custom_categories(test_email, custom_categories)
-    logger.info(f"Email categorized with custom categories as: {custom_category['name']}")
+    custom_results = batch_categorize_emails_for_account([test_email], custom_account)
+    logger.info(f"Email categorized with custom categories as: {custom_results[0]['category']}")
     
     # View the log file
     logger.info("Checking log file")
     try:
-        with open('logs/detailed_openai_logs.jsonl', 'r') as f:
-            lines = f.readlines()
-            logger.info(f"Found {len(lines)} log entries")
-            
-            # Display the most recent log entry
-            if lines:
-                latest_entry = json.loads(lines[-1])
-                logger.info("Latest log entry:")
-                logger.info(f"  Timestamp: {latest_entry.get('timestamp', '')}")
-                logger.info(f"  Email Subject: {latest_entry.get('email_subject', '')}")
-                logger.info(f"  Category Result: {latest_entry.get('category_result', '')}")
+        log_files = [f for f in os.listdir('logs') if f.startswith('categorization_')]
+        if log_files:
+            latest_log = os.path.join('logs', sorted(log_files)[-1])
+            with open(latest_log, 'r') as f:
+                lines = f.readlines()
+                logger.info(f"Found {len(lines)} log entries in {latest_log}")
+                
+                # Display the most recent log entry
+                if lines:
+                    latest_entry = json.loads(lines[-1])
+                    logger.info("Latest log entry:")
+                    logger.info(f"  Timestamp: {latest_entry.get('timestamp', '')}")
+                    logger.info(f"  Email Subject: {latest_entry.get('email_subject', '')}")
+                    logger.info(f"  Category: {latest_entry.get('category', '')}")
+        else:
+            logger.warning("No log files found")
     except FileNotFoundError:
-        logger.error("Log file not found")
+        logger.error("Logs directory not found")
+    except Exception as e:
+        logger.error(f"Error reading log files: {e}")
     
     # Clean up old logs
     logger.info("Cleaning up old logs")
