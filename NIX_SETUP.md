@@ -2,7 +2,25 @@
 
 This project includes a Nix flake for setting up a reproducible development environment. This ensures that all developers work with the same versions of dependencies, regardless of their host system.
 
-## Prerequisites
+## Quick Setup
+
+For a quick and automated setup, you can use the provided setup script:
+
+```bash
+./setup-env.sh
+```
+
+This script will:
+
+1. Check if Nix and direnv are installed (and install direnv if needed)
+2. Enable Nix flakes if not already enabled
+3. Clean up any previous environment
+4. Create a `.env` file if it doesn't exist
+5. Allow direnv to load the environment
+
+## Manual Setup
+
+### Prerequisites
 
 1. Install [Nix](https://nixos.org/download.html) package manager:
 
@@ -36,8 +54,6 @@ This project includes a Nix flake for setting up a reproducible development envi
    direnv hook fish | source
    ```
 
-## Usage
-
 ### First-time Setup
 
 1. Clone the repository:
@@ -61,13 +77,22 @@ This project includes a Nix flake for setting up a reproducible development envi
    # Edit .env and add your OpenAI API key
    ```
 
-### Daily Development
+## How It Works
+
+The Nix flake in this project uses a simplified approach:
+
+1. It creates a minimal Python environment with only the essential development tools
+2. It sets up a Python virtual environment using `venv`
+3. It installs the project and its dependencies using `pip install -e ".[dev]"`
+
+This approach combines the reproducibility of Nix with the flexibility of pip, making it easier to handle Python packages that might be difficult to package with Nix directly.
+
+## Daily Development
 
 Once set up, the environment will automatically load whenever you enter the project directory. The environment includes:
 
-- Python 3.11 with all required dependencies
-- Development tools (pytest, black, isort, mypy)
-- Virtual environment management
+- Python 3.11 with essential development tools
+- A Python virtual environment with all project dependencies
 - Proper PYTHONPATH configuration
 
 ### Manual Usage (without direnv)
@@ -107,42 +132,48 @@ mypy src/
   This is usually caused by direnv not recognizing the shell directive. The file has been updated to use a shebang instead.
 
 - **Python package compatibility issues**:
-  The flake now uses Python 3.11 instead of 3.10 to avoid compatibility issues with certain packages.
+  The flake now uses a simplified approach that relies on pip for package installation, avoiding Nix packaging issues.
 
 - **"error: propcache-X.X.X not supported for interpreter pythonX.X"**:
-  This error occurs when a Python package is not compatible with the specified Python version. Try running `direnv reload` after the flake.nix has been updated.
+  This error should no longer occur with the simplified approach.
 
 - **Virtual environment activation fails**:
   The shell hook now includes error handling to recreate the virtual environment if activation fails.
 
 ### General Troubleshooting Steps
 
-1. **Update the flake lock file**:
+1. **Run the setup script**:
+
+   ```bash
+   ./setup-env.sh
+   ```
+
+2. **Update the flake lock file**:
 
    ```bash
    nix flake update
    ```
 
-2. **Reload the direnv environment**:
+3. **Reload the direnv environment**:
 
    ```bash
    direnv reload
    ```
 
-3. **Clean up and rebuild**:
+4. **Clean up and rebuild manually**:
 
    ```bash
    rm -rf .direnv .venv
    direnv allow
    ```
 
-4. **Check Nix store for corruption**:
+5. **Check Nix store for corruption**:
 
    ```bash
    nix-store --verify --check-contents
    ```
 
-5. **OpenAI API key not found**: Set it in your `.env` file or export it in your shell.
+6. **OpenAI API key not found**: Set it in your `.env` file or export it in your shell.
 
 ## Benefits of Using Nix
 
@@ -155,7 +186,7 @@ mypy src/
 
 ### Customizing Python Packages
 
-If you need to add or modify Python packages, edit the `pythonEnv` definition in `flake.nix`. For packages with specific version requirements, you can use the `buildPythonPackage` function as shown with the OpenAI package.
+If you need to add or modify Python packages, edit the `install_requires` list in `setup.py`. For development-only packages, add them to the `extras_require["dev"]` list.
 
 ### Using a Different Python Version
 
