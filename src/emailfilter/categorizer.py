@@ -321,23 +321,36 @@ def batch_categorize_emails_for_account(
         # Call OpenAI API
         response_text = call_openai_api(system_prompt, user_prompt, model)
         
-        # Log interaction for debugging
-        for i, email in enumerate(emails[:actual_batch_size]):
-            log_openai_interaction(
-                email, 
-                f"Batch categorization with {model} (email {i+1} of {actual_batch_size})", 
-                response_text, 
-                "See full response"
-            )
-        
         # Parse response
         results = parse_openai_response(response_text, account.categories, actual_batch_size)
+        
+        # Log interaction for debugging with actual categories
+        for i, email in enumerate(emails[:actual_batch_size]):
+            if i < len(results):
+                category_result = results[i]["category"]
+                log_openai_interaction(
+                    email, 
+                    f"Batch categorization with {model} (email {i+1} of {actual_batch_size})", 
+                    response_text, 
+                    category_result
+                )
         
         return results
     except Exception as e:
         logger.error(f"Error calling OpenAI API: {e}")
         # Fallback: categorize all as inbox
-        return [{"category": "INBOX", "confidence": 0, "reasoning": f"API error: {str(e)}"}] * actual_batch_size
+        fallback_results = [{"category": "INBOX", "confidence": 0, "reasoning": f"API error: {str(e)}"}] * actual_batch_size
+        
+        # Log the fallback categorization
+        for i, email in enumerate(emails[:actual_batch_size]):
+            log_openai_interaction(
+                email,
+                f"Batch categorization with {model} failed (email {i+1} of {actual_batch_size})",
+                f"Error: {str(e)}",
+                "INBOX"
+            )
+        
+        return fallback_results
 
 # For backward compatibility with tests and examples
 # Default categories if not specified in config
