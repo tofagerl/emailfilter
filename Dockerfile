@@ -1,4 +1,4 @@
-FROM python:3.10-slim AS builder
+FROM python:3.10-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -10,9 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     gcc \
-    && rm -rf /var/lib/apt/lists/*
+    musl-dev \
+    python3-dev
 
 # Copy project files
 COPY pyproject.toml README.md ./
@@ -29,7 +30,7 @@ RUN pip wheel --no-cache-dir --wheel-dir /app/wheels .
 RUN pip wheel --no-cache-dir --wheel-dir /app/wheels hatchling editables openai pyyaml
 
 # Final stage
-FROM python:3.10-slim
+FROM python:3.10-alpine
 
 # Set working directory
 WORKDIR /app
@@ -40,8 +41,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=UTC
 
 # Create non-root user and required directories
-RUN groupadd -r emailfilter && \
-    useradd -r -g emailfilter emailfilter && \
+RUN addgroup -S emailfilter && \
+    adduser -S -G emailfilter emailfilter && \
     mkdir -p /config /home/emailfilter/logs /home/emailfilter/.emailfilter && \
     chown -R emailfilter:emailfilter /config /home/emailfilter
 
