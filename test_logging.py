@@ -7,8 +7,7 @@ import logging
 from dotenv import load_dotenv
 
 from emailfilter.categorizer import (
-    initialize_openai_client, batch_categorize_emails_for_account,
-    cleanup_old_logs
+    initialize_openai_client, batch_categorize_emails_for_account
 )
 from emailfilter.models import EmailAccount, Category
 
@@ -95,31 +94,6 @@ def main():
     
     custom_results = batch_categorize_emails_for_account([test_email], custom_account)
     logger.debug(f"Email categorized with custom categories as: {custom_results[0]['category']}")
-    
-    # Check log file
-    logger.debug("Checking log file")
-    log_files = [f for f in os.listdir(logs_dir) if f.startswith("categorization_")]
-    
-    if log_files:
-        latest_log = os.path.join(logs_dir, sorted(log_files)[-1])
-        with open(latest_log, "r") as f:
-            lines = f.readlines()
-        
-        logger.debug(f"Found {len(lines)} log entries in {latest_log}")
-        
-        if lines:
-            latest_entry = json.loads(lines[-1])
-            
-            logger.debug("Latest log entry:")
-            logger.debug(f"  Timestamp: {latest_entry.get('timestamp', '')}")
-            logger.debug(f"  Email Subject: {latest_entry.get('email_subject', '')}")
-            logger.debug(f"  Category: {latest_entry.get('category', '')}")
-    
-    # Test cleanup
-    if args.cleanup:
-        logger.debug("Cleaning up old logs")
-        deleted_count = cleanup_old_logs(0)  # Delete all logs
-        logger.debug(f"Cleaned up {deleted_count} old log entries")
 
 if __name__ == "__main__":
     main() 

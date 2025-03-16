@@ -20,15 +20,6 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
-# Get logs directory from environment variable or use default
-logs_dir = os.environ.get('EMAILFILTER_LOGS_DIR', 'logs')
-os.makedirs(logs_dir, exist_ok=True)
-
-# Create a file handler for detailed logs
-file_handler = logging.FileHandler(os.path.join(logs_dir, 'openai_interactions.log'))
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
 # Global client
 client = None
 
@@ -90,23 +81,6 @@ def log_openai_interaction(email: Dict[str, str], prompt: str, response: str, ca
         category_result: The final category assigned
     """
     try:
-        # Create log entry with more detailed email information
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "email_subject": email.get("subject", ""),
-            "email_from": email.get("from", ""),
-            "email_to": email.get("to", ""),
-            "email_date": email.get("date", ""),
-            "prompt": prompt,
-            "response": response,
-            "category": category_result
-        }
-        
-        # Write to log file
-        log_file = os.path.join(logs_dir, f"categorization_{datetime.now().strftime('%Y-%m-%d')}.log")
-        with open(log_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-            
         # Log a summary to the application log
         logger.info(
             f"Categorized email: "
@@ -387,41 +361,4 @@ def create_email_category_enum(categories=None):
     return EmailCategory
 
 # Initialize with default categories for backward compatibility
-EmailCategory = create_email_category_enum()
-
-def cleanup_old_logs(max_age_days: int = 7) -> int:
-    """Clean up old log files.
-    
-    Args:
-        max_age_days: Maximum age of log files in days
-        
-    Returns:
-        Number of files deleted
-    """
-    try:
-        # Get current time
-        now = datetime.now()
-        cutoff_date = now - timedelta(days=max_age_days)
-        
-        # Get list of log files
-        log_files = [f for f in os.listdir(logs_dir) if f.startswith("categorization_")]
-        
-        # Delete old files
-        deleted_count = 0
-        for file_name in log_files:
-            try:
-                # Extract date from filename
-                date_str = file_name.replace("categorization_", "").replace(".log", "")
-                file_date = datetime.strptime(date_str, "%Y-%m-%d")
-                
-                # Check if file is older than cutoff date
-                if file_date < cutoff_date:
-                    os.remove(os.path.join(logs_dir, file_name))
-                    deleted_count += 1
-            except Exception as e:
-                logger.error(f"Error processing log file {file_name}: {e}")
-        
-        return deleted_count
-    except Exception as e:
-        logger.error(f"Error cleaning up old logs: {e}")
-        return 0 
+EmailCategory = create_email_category_enum() 

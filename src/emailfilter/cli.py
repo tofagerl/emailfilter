@@ -43,11 +43,6 @@ def handle_categorize_command(args):
             logger.error(f"Error initializing OpenAI client: {e}")
             sys.exit(1)
         
-        # Clean up old logs if requested
-        if args.cleanup_logs:
-            deleted = categorizer.cleanup_old_logs(args.cleanup_logs_days)
-            logger.debug(f"Deleted {deleted} old log files")
-        
         # Create a mock account with the appropriate categories
         mock_account = EmailAccount(
             name="CLI",
@@ -389,17 +384,6 @@ def main():
         "--custom-categories",
         type=str,
         help="Path to JSON file containing custom categories"
-    )
-    categorize_parser.add_argument(
-        "--cleanup-logs",
-        action="store_true",
-        help="Clean up old log files"
-    )
-    categorize_parser.add_argument(
-        "--cleanup-logs-days",
-        type=int,
-        default=7,
-        help="Maximum age of log files in days (default: 7)"
     )
     categorize_parser.add_argument(
         "--batch-size",
