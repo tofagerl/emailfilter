@@ -17,7 +17,7 @@ __version__ = "1.0.0"
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stdout
 )
@@ -46,7 +46,7 @@ def handle_categorize_command(args):
         # Clean up old logs if requested
         if args.cleanup_logs:
             deleted = categorizer.cleanup_old_logs(args.cleanup_logs_days)
-            logger.info(f"Deleted {deleted} old log files")
+            logger.debug(f"Deleted {deleted} old log files")
         
         # Create a mock account with the appropriate categories
         mock_account = EmailAccount(
@@ -89,7 +89,7 @@ def handle_categorize_command(args):
             
             # Categorize emails
             if args.category != "all":
-                logger.info(f"Filtering by category: {args.category}")
+                logger.debug(f"Filtering by category: {args.category}")
                 
                 # Categorize all emails
                 results = []
@@ -112,7 +112,7 @@ def handle_categorize_command(args):
                 with open(args.output, "w") as f:
                     json.dump(filtered_emails, f, indent=2)
             else:
-                logger.info("Categorizing emails")
+                logger.debug("Categorizing emails")
                 
                 # Categorize all emails
                 all_results = {}
@@ -159,7 +159,7 @@ def handle_categorize_command(args):
             
             # Categorize emails
             if args.category != "all":
-                logger.info(f"Filtering by category: {args.category}")
+                logger.debug(f"Filtering by category: {args.category}")
                 
                 # Categorize all emails
                 results = []
@@ -182,7 +182,7 @@ def handle_categorize_command(args):
                 with open(args.output, "w") as f:
                     json.dump(filtered_emails, f, indent=2)
             else:
-                logger.info("Categorizing emails")
+                logger.debug("Categorizing emails")
                 
                 # Categorize all emails
                 all_results = {cat.name.lower(): [] for cat in default_categories}
@@ -258,30 +258,30 @@ def handle_state_command(args):
             # View state
             if args.account:
                 count = state_manager.get_processed_count(args.account)
-                logger.info(f"Account '{args.account}' has {count} processed emails")
+                logger.debug(f"Account '{args.account}' has {count} processed emails")
                 
                 # Show category stats if requested
                 if args.stats:
                     stats = state_manager.get_category_stats(args.account)
-                    logger.info(f"Category statistics for account '{args.account}':")
+                    logger.debug(f"Category statistics for account '{args.account}':")
                     for category, count in stats.items():
-                        logger.info(f"  {category}: {count} emails")
+                        logger.debug(f"  {category}: {count} emails")
             else:
                 accounts = state_manager.get_accounts()
-                logger.info(f"Found {len(accounts)} accounts in the state database")
+                logger.debug(f"Found {len(accounts)} accounts in the state database")
                 for account in accounts:
                     count = state_manager.get_processed_count(account)
-                    logger.info(f"Account '{account}' has {count} processed emails")
+                    logger.debug(f"Account '{account}' has {count} processed emails")
                     
                     # Show category stats if requested
                     if args.stats:
                         stats = state_manager.get_category_stats(account)
-                        logger.info(f"  Category statistics:")
+                        logger.debug(f"  Category statistics:")
                         for category, count in stats.items():
-                            logger.info(f"    {category}: {count} emails")
+                            logger.debug(f"    {category}: {count} emails")
                 
                 total = state_manager.get_processed_count()
-                logger.info(f"Total processed emails: {total}")
+                logger.debug(f"Total processed emails: {total}")
         
         elif args.action == "search":
             # Search for emails
@@ -296,26 +296,26 @@ def handle_state_command(args):
             )
             
             if results:
-                logger.info(f"Found {len(results)} matching emails:")
+                logger.debug(f"Found {len(results)} matching emails:")
                 for i, email in enumerate(results):
-                    logger.info(f"Email {i+1}:")
-                    logger.info(f"  Account: {email['account_name']}")
-                    logger.info(f"  From: {email['from_addr']}")
-                    logger.info(f"  To: {email['to_addr']}")
-                    logger.info(f"  Subject: {email['subject']}")
-                    logger.info(f"  Category: {email['category']}")
-                    logger.info(f"  Processed: {email['processed_date']}")
-                    logger.info("")
+                    logger.debug(f"Email {i+1}:")
+                    logger.debug(f"  Account: {email['account_name']}")
+                    logger.debug(f"  From: {email['from_addr']}")
+                    logger.debug(f"  To: {email['to_addr']}")
+                    logger.debug(f"  Subject: {email['subject']}")
+                    logger.debug(f"  Category: {email['category']}")
+                    logger.debug(f"  Processed: {email['processed_date']}")
+                    logger.debug("")
                 
                 if len(results) == args.limit:
-                    logger.info(f"Showing {args.limit} results. Use --offset to see more.")
+                    logger.debug(f"Showing {args.limit} results. Use --offset to see more.")
             else:
-                logger.info("No matching emails found.")
+                logger.debug("No matching emails found.")
         
         elif args.action == "clean":
             # Clean state
             state_manager.cleanup_old_entries(args.max_age_days)
-            logger.info(f"Cleaned up state entries older than {args.max_age_days} days")
+            logger.debug(f"Cleaned up state entries older than {args.max_age_days} days")
         
         elif args.action == "reset":
             # Reset state by recreating the database
@@ -324,7 +324,7 @@ def handle_state_command(args):
                 if args.force or input("Are you sure? (y/n): ").lower() == "y":
                     # Delete all entries for this account
                     deleted = state_manager.delete_account_entries(args.account)
-                    logger.info(f"Reset state for account '{args.account}'. Deleted {deleted} entries.")
+                    logger.debug(f"Reset state for account '{args.account}'. Deleted {deleted} entries.")
             else:
                 logger.warning("This will reset the state for all accounts. All emails will be reprocessed.")
                 if args.force or input("Are you sure? (y/n): ").lower() == "y":
@@ -334,11 +334,11 @@ def handle_state_command(args):
                     # Delete the database file and recreate it
                     if os.path.exists(db_path):
                         os.remove(db_path)
-                        logger.info("State database deleted")
+                        logger.debug("State database deleted")
                     
                     # Reinitialize the database
                     state_manager = SQLiteStateManager(db_path)
-                    logger.info("State database reinitialized")
+                    logger.debug("State database reinitialized")
     
     except Exception as e:
         logger.error(f"Error managing state: {e}")

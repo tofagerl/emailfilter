@@ -18,7 +18,7 @@ handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 # Get logs directory from environment variable or use default
 logs_dir = os.environ.get('EMAILFILTER_LOGS_DIR', 'logs')
@@ -47,7 +47,7 @@ def initialize_openai_client(api_key: str = None, config_path: str = None) -> No
     # If API key is provided directly, use it
     if api_key:
         client = OpenAI(api_key=api_key)
-        logger.info("OpenAI client initialized with provided API key")
+        logger.debug("OpenAI client initialized with provided API key")
         return
     
     # If config path is provided, try to load the API key from it
@@ -61,7 +61,7 @@ def initialize_openai_client(api_key: str = None, config_path: str = None) -> No
                 raise ValueError("OpenAI API key not found in config file")
             
             client = OpenAI(api_key=config_api_key)
-            logger.info("OpenAI client initialized with API key from config file")
+            logger.debug("OpenAI client initialized with API key from config file")
             return
         except Exception as e:
             logger.error(f"Error loading API key from config: {e}")
@@ -71,7 +71,7 @@ def initialize_openai_client(api_key: str = None, config_path: str = None) -> No
     env_api_key = os.environ.get("OPENAI_API_KEY")
     if env_api_key:
         client = OpenAI(api_key=env_api_key)
-        logger.info("OpenAI client initialized with API key from environment variable")
+        logger.debug("OpenAI client initialized with API key from environment variable")
         return
     
     # If we get here, we couldn't initialize the client

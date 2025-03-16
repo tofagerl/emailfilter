@@ -42,7 +42,7 @@ warnings.warn(
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stdout  # Explicitly use stdout
 )
@@ -146,8 +146,8 @@ class EmailProcessor:
             # Initialize OpenAI client
             categorizer.initialize_openai_client(config_path=self.config_path)
             
-            logger.info(f"Loaded configuration from {self.config_path}")
-            logger.info(f"Loaded {len(self.accounts)} accounts")
+            logger.debug(f"Loaded configuration from {self.config_path}")
+            logger.debug(f"Loaded {len(self.accounts)} accounts")
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
             raise
@@ -162,10 +162,10 @@ class EmailProcessor:
             IMAPClient object or None if connection failed
         """
         try:
-            logger.info(f"Connecting to {account.imap_server}:{account.imap_port}")
+            logger.debug(f"Connecting to {account.imap_server}:{account.imap_port}")
             client = IMAPClient(account.imap_server, port=account.imap_port, ssl=account.ssl)
             client.login(account.email_address, account.password)
-            logger.info(f"Connected to {account}")
+            logger.debug(f"Connected to {account}")
             return client
         except Exception as e:
             logger.error(f"Error connecting to {account}: {e}")
@@ -197,11 +197,11 @@ class EmailProcessor:
                 try:
                     # Select the folder
                     client.select_folder(folder)
-                    logger.info(f"Selected folder: {folder}")
+                    logger.debug(f"Selected folder: {folder}")
                     
                     # Search for all emails in the folder
                     messages = client.search("ALL")
-                    logger.info(f"Found {len(messages)} messages in {folder}")
+                    logger.debug(f"Found {len(messages)} messages in {folder}")
                     
                     # Limit the number of messages to process
                     messages = messages[-max_emails:]
@@ -247,7 +247,7 @@ class EmailProcessor:
         finally:
             client.logout()
         
-        logger.info(f"Fetched {len(email_data)} unprocessed emails from {account}")
+        logger.debug(f"Fetched {len(email_data)} unprocessed emails from {account}")
         return email_data
 
     def process_categorized_emails(
@@ -341,7 +341,7 @@ class EmailProcessor:
                 emails = self.fetch_unprocessed_emails(account, max_emails)
                 
                 if not emails:
-                    logger.info(f"No new emails to process for {account}")
+                    logger.debug(f"No new emails to process for {account}")
                     continue
                 
                 logger.info(f"Processing {len(emails)} emails for {account}")
@@ -390,7 +390,7 @@ class EmailProcessor:
         # Set up signal handler for graceful shutdown
         def signal_handler(sig, frame):
             global running
-            logger.info("Received shutdown signal, stopping...")
+            logger.debug("Received shutdown signal, stopping...")
             running = False
         
         signal.signal(signal.SIGINT, signal_handler)
@@ -411,7 +411,7 @@ class EmailProcessor:
         while running and any(t.is_alive() for t in threads):
             time.sleep(1)
         
-        logger.info("Monitoring stopped")
+        logger.debug("Monitoring stopped")
 
     def _monitor_account(self, account: EmailAccount) -> None:
         """Monitor an account for new emails.
@@ -419,7 +419,7 @@ class EmailProcessor:
         Args:
             account: The EmailAccount to monitor
         """
-        logger.info(f"Starting monitoring for {account}")
+        logger.debug(f"Starting monitoring for {account}")
         
         # Initialize reconnection parameters
         max_retry_delay = 300  # 5 minutes
@@ -443,7 +443,7 @@ class EmailProcessor:
                 # Process each folder
                 for folder in account.folders:
                     try:
-                        logger.info(f"Monitoring folder: {folder}")
+                        logger.debug(f"Monitoring folder: {folder}")
                         client.select_folder(folder)
                         
                         # Initial processing of existing emails
@@ -461,7 +461,7 @@ class EmailProcessor:
                             self.process_categorized_emails(client, account.name, categorized_emails, self.options.get("category_folders", {}), self.options.get("move_emails", True))
                         
                         # Start IDLE mode with shorter timeouts for better error detection
-                        logger.info(f"Entering IDLE mode for {folder}")
+                        logger.debug(f"Entering IDLE mode for {folder}")
                         idle_timeout = self.options.get("idle_timeout", 1740)  # Default 29 minutes
                         check_interval = 60  # Check connection every minute
                         
@@ -478,7 +478,7 @@ class EmailProcessor:
                                 
                                 # Check if we received any new emails
                                 if responses:
-                                    logger.info(f"Received new emails in {folder}")
+                                    logger.debug(f"Received new emails in {folder}")
                                     
                                     # Process new emails
                                     emails = self.fetch_unprocessed_emails(account, max_emails)
@@ -516,7 +516,7 @@ class EmailProcessor:
                 # Logout
                 try:
                     client.logout()
-                    logger.info(f"Logged out from {account}")
+                    logger.debug(f"Logged out from {account}")
                 except:
                     pass
                 
@@ -529,7 +529,7 @@ class EmailProcessor:
                 # Exponential backoff with maximum delay
                 retry_delay = min(retry_delay * 2, max_retry_delay)
         
-        logger.info(f"Stopped monitoring for {account}")
+        logger.debug(f"Stopped monitoring for {account}")
 
     def _extract_email_info(self, message: Message) -> Dict[str, Any]:
         """Extract information from an email message.
@@ -661,7 +661,7 @@ class EmailProcessor:
         Returns:
             Dictionary mapping folders to dictionaries mapping categories to counts
         """
-        logger.info(f"Processing emails for account: {account.name}")
+        logger.debug(f"Processing emails for account: {account.name}")
         
         # Connect to the account
         client = self.connect_to_account(account)
@@ -674,7 +674,7 @@ class EmailProcessor:
         try:
             # Process each folder
             for folder in account.folders:
-                logger.info(f"Processing folder: {folder}")
+                logger.debug(f"Processing folder: {folder}")
                 
                 # Select the folder
                 client.select_folder(folder)
@@ -682,11 +682,11 @@ class EmailProcessor:
                 # Fetch unprocessed emails
                 emails = self.fetch_unprocessed_emails(account, max_emails)
                 if not emails:
-                    logger.info(f"No unprocessed emails found in folder: {folder}")
+                    logger.debug(f"No unprocessed emails found in folder: {folder}")
                     results[folder] = {}
                     continue
                 
-                logger.info(f"Found {len(emails)} unprocessed emails in folder: {folder}")
+                logger.debug(f"Found {len(emails)} unprocessed emails in folder: {folder}")
                 
                 # Convert to list of dictionaries for categorization
                 email_list = []
@@ -752,7 +752,7 @@ def main(config_path: str, daemon_mode: bool = False) -> None:
     processor = EmailProcessor(config_path)
     
     if daemon_mode:
-        logger.info("Starting continuous email monitoring...")
+        logger.debug("Starting continuous email monitoring...")
         processor.start_monitoring()
     else:
         # One-time processing mode

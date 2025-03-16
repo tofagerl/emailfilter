@@ -74,7 +74,7 @@ class ConfigManager:
             if not self.openai_api_key:
                 raise ValueError("OpenAI API key not found in config file")
             
-            logger.info(f"Loaded configuration with {len(self.accounts)} accounts")
+            logger.debug(f"Loaded configuration with {len(self.accounts)} accounts")
         except FileNotFoundError:
             logger.error(f"Config file not found: {self.config_path}")
             raise ValueError(f"Config file not found: {self.config_path}")

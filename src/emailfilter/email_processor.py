@@ -42,7 +42,7 @@ class EmailProcessor:
         # Initialize OpenAI client
         try:
             categorizer.initialize_openai_client(api_key=self.config_manager.openai_api_key)
-            logger.info("OpenAI client initialized successfully")
+            logger.debug("OpenAI client initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing OpenAI client: {e}")
             raise
@@ -204,7 +204,7 @@ class EmailProcessor:
                             unprocessed_emails[msg_id] = email_obj
                     
                     if not unprocessed_emails:
-                        logger.info(f"No unprocessed emails in {folder}")
+                        logger.debug(f"No unprocessed emails in {folder}")
                         continue
                     
                     # Categorize emails
@@ -260,7 +260,7 @@ class EmailProcessor:
         # Set up signal handler for graceful shutdown
         def signal_handler(sig, frame):
             global running
-            logger.info("Received shutdown signal, stopping...")
+            logger.debug("Received shutdown signal, stopping...")
             running = False
         
         signal.signal(signal.SIGINT, signal_handler)
@@ -345,15 +345,15 @@ class EmailProcessor:
                                     folder
                                 )
                             else:
-                                logger.info(f"No unprocessed emails found in {folder}")
+                                logger.debug(f"No unprocessed emails found in {folder}")
                             
                             # Get the current message count before IDLE
                             pre_idle_messages = client.search(['ALL'])
                             pre_idle_count = len(pre_idle_messages)
-                            logger.info(f"Current message count before IDLE: {pre_idle_count}")
+                            logger.debug(f"Current message count before IDLE: {pre_idle_count}")
                             
                             # Now enter IDLE mode to wait for new emails
-                            logger.info(f"Waiting for new emails in {folder}")
+                            logger.debug(f"Waiting for new emails in {folder}")
                             client.idle()
                             
                             # Wait for new emails or timeout
@@ -361,28 +361,28 @@ class EmailProcessor:
                             client.idle_done()
                             
                             # Log all responses for debugging
-                            logger.info(f"IDLE responses: {responses}")
+                            logger.debug(f"IDLE responses: {responses}")
                             
                             # Check if we received new emails
                             has_new_emails = False
                             for response in responses:
                                 if response[1] == b'EXISTS':
                                     has_new_emails = True
-                                    logger.info(f"Detected new email: {response}")
+                                    logger.debug(f"Detected new email: {response}")
                                     break
                             
                             # Double-check by comparing message counts
                             post_idle_messages = client.search(['ALL'])
                             post_idle_count = len(post_idle_messages)
-                            logger.info(f"Message count after IDLE: {post_idle_count}")
+                            logger.debug(f"Message count after IDLE: {post_idle_count}")
                             
                             if post_idle_count > pre_idle_count:
-                                logger.info(f"New messages detected: {post_idle_count - pre_idle_count}")
+                                logger.debug(f"New messages detected: {post_idle_count - pre_idle_count}")
                                 has_new_emails = True
                             
                             # Always check for new emails after IDLE, even if no EXISTS notification
                             # This helps catch emails that might have been missed
-                            logger.info(f"Checking for new emails after IDLE (has_new_emails={has_new_emails})")
+                            logger.debug(f"Checking for new emails after IDLE (has_new_emails={has_new_emails})")
                             
                             # Get all emails again
                             emails = self.imap_manager.get_emails(
@@ -415,7 +415,7 @@ class EmailProcessor:
                                     folder
                                 )
                             else:
-                                logger.info(f"No unprocessed emails found after IDLE")
+                                logger.debug(f"No unprocessed emails found after IDLE")
                         except Exception as e:
                             logger.error(f"Error monitoring folder {folder}: {e}")
                             time.sleep(60)  # Wait before retrying

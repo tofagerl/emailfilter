@@ -14,7 +14,7 @@ from emailfilter.models import EmailAccount, Category
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -67,58 +67,59 @@ def main():
         ]
     )
     
-    # Test with default categories
-    logger.info("Testing categorization with default categories")
+    # Test categorization with default categories
+    logger.debug("Testing categorization with default categories")
     results = batch_categorize_emails_for_account([test_email], default_account)
-    logger.info(f"Email categorized as: {results[0]['category']}")
+    logger.debug(f"Email categorized as: {results[0]['category']}")
     
-    # Test with custom categories
-    logger.info("Testing categorization with custom categories")
+    # Test categorization with custom categories
+    logger.debug("Testing categorization with custom categories")
+    
+    # Create custom categories
+    custom_categories = [
+        Category("IMPORTANT", "Critical emails", "Important"),
+        Category("NEWSLETTERS", "Regular newsletters", "Newsletters"),
+        Category("SOCIAL", "Social media notifications", "Social"),
+        Category("FINANCE", "Financial emails", "Finance"),
+        Category("OTHER", "Other emails", "Other")
+    ]
+    
+    # Create account with custom categories
     custom_account = EmailAccount(
-        name="Custom Account",
-        email_address="custom@example.com",
-        password="password",
-        imap_server="imap.example.com",
-        categories=[
-            Category("SPAM", "Unwanted, unsolicited emails that might be scams or junk", "[Spam]"),
-            Category("MARKETING", "Promotional emails, offers, and advertisements", "[Marketing]"),
-            Category("IMPORTANT", "Critical emails that need immediate attention", "INBOX"),
-            Category("NEWSLETTERS", "Regular updates and newsletters", "[Newsletters]"),
-            Category("PERSONAL", "Personal communications from friends and family", "[Personal]")
-        ]
+        name="Test",
+        email_address="test@example.com",
+        password="",
+        imap_server="",
+        categories=custom_categories
     )
     
     custom_results = batch_categorize_emails_for_account([test_email], custom_account)
-    logger.info(f"Email categorized with custom categories as: {custom_results[0]['category']}")
+    logger.debug(f"Email categorized with custom categories as: {custom_results[0]['category']}")
     
-    # View the log file
-    logger.info("Checking log file")
-    try:
-        log_files = [f for f in os.listdir('logs') if f.startswith('categorization_')]
-        if log_files:
-            latest_log = os.path.join('logs', sorted(log_files)[-1])
-            with open(latest_log, 'r') as f:
-                lines = f.readlines()
-                logger.info(f"Found {len(lines)} log entries in {latest_log}")
-                
-                # Display the most recent log entry
-                if lines:
-                    latest_entry = json.loads(lines[-1])
-                    logger.info("Latest log entry:")
-                    logger.info(f"  Timestamp: {latest_entry.get('timestamp', '')}")
-                    logger.info(f"  Email Subject: {latest_entry.get('email_subject', '')}")
-                    logger.info(f"  Category: {latest_entry.get('category', '')}")
-        else:
-            logger.warning("No log files found")
-    except FileNotFoundError:
-        logger.error("Logs directory not found")
-    except Exception as e:
-        logger.error(f"Error reading log files: {e}")
+    # Check log file
+    logger.debug("Checking log file")
+    log_files = [f for f in os.listdir(logs_dir) if f.startswith("categorization_")]
     
-    # Clean up old logs
-    logger.info("Cleaning up old logs")
-    deleted_count = cleanup_old_logs()
-    logger.info(f"Cleaned up {deleted_count} old log entries")
+    if log_files:
+        latest_log = os.path.join(logs_dir, sorted(log_files)[-1])
+        with open(latest_log, "r") as f:
+            lines = f.readlines()
+        
+        logger.debug(f"Found {len(lines)} log entries in {latest_log}")
+        
+        if lines:
+            latest_entry = json.loads(lines[-1])
+            
+            logger.debug("Latest log entry:")
+            logger.debug(f"  Timestamp: {latest_entry.get('timestamp', '')}")
+            logger.debug(f"  Email Subject: {latest_entry.get('email_subject', '')}")
+            logger.debug(f"  Category: {latest_entry.get('category', '')}")
+    
+    # Test cleanup
+    if args.cleanup:
+        logger.debug("Cleaning up old logs")
+        deleted_count = cleanup_old_logs(0)  # Delete all logs
+        logger.debug(f"Cleaned up {deleted_count} old log entries")
 
 if __name__ == "__main__":
     main() 

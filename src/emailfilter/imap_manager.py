@@ -29,17 +29,17 @@ class IMAPManager:
         try:
             # Check if already connected
             if account.name in self.connections and self.connections[account.name].is_connected:
-                logger.info(f"Already connected to {account}")
+                logger.debug(f"Already connected to {account}")
                 return self.connections[account.name]
             
             # Create new connection
-            logger.info(f"Connecting to {account}")
+            logger.debug(f"Connecting to {account}")
             client = IMAPClient(account.imap_server, port=account.imap_port, ssl=account.ssl)
             client.login(account.email_address, account.password)
             
             # Store connection
             self.connections[account.name] = client
-            logger.info(f"Connected to {account}")
+            logger.debug(f"Connected to {account}")
             return client
         except Exception as e:
             logger.error(f"Error connecting to {account}: {e}")
@@ -54,7 +54,7 @@ class IMAPManager:
         if account_name in self.connections:
             try:
                 self.connections[account_name].logout()
-                logger.info(f"Disconnected from {account_name}")
+                logger.debug(f"Disconnected from {account_name}")
             except Exception as e:
                 logger.error(f"Error disconnecting from {account_name}: {e}")
             finally:
@@ -76,7 +76,7 @@ class IMAPManager:
         folder_names = [f[2] for f in folders]
         
         if folder not in folder_names:
-            logger.info(f"Creating folder: {folder}")
+            logger.debug(f"Creating folder: {folder}")
             client.create_folder(folder)
     
     def move_email(self, client: IMAPClient, msg_id: int, target_folder: str) -> bool:
@@ -130,7 +130,7 @@ class IMAPManager:
                 if messages:
                     # Remove the Seen flag to keep it unread
                     client.remove_flags(messages, [b'\\Seen'])
-                    logger.info(f"Preserved unread status for {len(messages)} emails in {target_folder}")
+                    logger.debug(f"Preserved unread status for {len(messages)} emails in {target_folder}")
             
             return True
         except Exception as e:
@@ -153,26 +153,26 @@ class IMAPManager:
         try:
             # Select the folder
             client.select_folder(folder)
-            logger.info(f"Selected folder: {folder}")
+            logger.debug(f"Selected folder: {folder}")
             
             # Search for all emails in the folder
             messages = client.search(['ALL'])
-            logger.info(f"Found {len(messages)} emails in {folder}")
+            logger.debug(f"Found {len(messages)} emails in {folder}")
             
             # Sort messages by ID (higher IDs are more recent)
             messages.sort(reverse=True)
             
             # Limit the number of emails (most recent first)
             if max_emails > 0 and len(messages) > max_emails:
-                logger.info(f"Limiting to {max_emails} most recent emails")
+                logger.debug(f"Limiting to {max_emails} most recent emails")
                 messages = messages[:max_emails]
             
             # Fetch email data
             if not messages:
-                logger.info(f"No messages to fetch from {folder}")
+                logger.debug(f"No messages to fetch from {folder}")
                 return {}
             
-            logger.info(f"Fetching {len(messages)} emails from {folder}")
+            logger.debug(f"Fetching {len(messages)} emails from {folder}")
             # Use BODY.PEEK[] instead of BODY[] to avoid marking emails as read
             raw_emails = client.fetch(messages, ['ENVELOPE', 'BODY.PEEK[]'])
             
@@ -203,7 +203,7 @@ class IMAPManager:
                 except Exception as e:
                     logger.error(f"Error processing email {msg_id}: {e}")
             
-            logger.info(f"Successfully processed {len(emails)} emails from {folder} without marking as read")
+            logger.debug(f"Successfully processed {len(emails)} emails from {folder} without marking as read")
             return emails
         except Exception as e:
             logger.error(f"Error fetching emails from {folder}: {e}")

@@ -11,7 +11,7 @@ from emailfilter.models import Email
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -46,24 +46,25 @@ def parse_args():
 
 def view_state(state_manager):
     """View the current state."""
-    logger.info("Current state:")
+    logger.debug("Current state:")
     
     accounts = state_manager.get_accounts()
     if not accounts:
-        logger.info("  No accounts found in state")
+        logger.debug("  No accounts found in state")
         return
     
+    total = 0
     for account in accounts:
         count = state_manager.get_processed_count(account)
-        logger.info(f"  Account: {account}")
-        logger.info(f"    Processed emails: {count}")
+        total += count
+        logger.debug(f"  Account: {account}")
+        logger.debug(f"    Processed emails: {count}")
     
-    total = state_manager.get_processed_count()
-    logger.info(f"Total processed emails: {total}")
+    logger.debug(f"Total processed emails: {total}")
 
 def add_test_emails(state_manager, account_name, count):
     """Add test emails to the state."""
-    logger.info(f"Adding {count} test emails to state for account '{account_name}'")
+    logger.debug(f"Adding {count} test emails to state for account '{account_name}'")
     
     # Create test emails
     for i in range(count):
@@ -82,33 +83,32 @@ def add_test_emails(state_manager, account_name, count):
         # Mark it as processed
         state_manager.mark_email_as_processed(account_name, email)
         
-    logger.info(f"Added {count} test emails to state")
+    logger.debug(f"Added {count} test emails to state")
 
 def clean_state(state_manager, max_age_days):
-    """Clean up the state."""
-    logger.info(f"Cleaning up state entries older than {max_age_days} days")
+    """Clean up old state entries."""
+    logger.debug(f"Cleaning up state entries older than {max_age_days} days")
     state_manager.cleanup_old_entries(max_age_days)
     
     # Show the current state after cleanup
     view_state(state_manager)
 
 def reset_state(state_manager, account_name=None):
-    """Reset the state."""
+    """Reset the state for an account or all accounts."""
     if account_name:
-        logger.info(f"Resetting state for account '{account_name}'")
+        logger.debug(f"Resetting state for account '{account_name}'")
         deleted = state_manager.delete_account_entries(account_name)
-        logger.info(f"Reset state for account '{account_name}'. Deleted {deleted} entries.")
+        logger.debug(f"Reset state for account '{account_name}'. Deleted {deleted} entries.")
     else:
-        logger.info("Resetting state for all accounts")
-        # Delete the database file and recreate it
-        db_path = state_manager.db_file_path
-        if os.path.exists(db_path):
-            os.remove(db_path)
-            logger.info("State database deleted")
+        logger.debug("Resetting state for all accounts")
+        # Delete the database file
+        if os.path.exists(state_manager.db_file_path):
+            os.remove(state_manager.db_file_path)
+            logger.debug("State database deleted")
         
         # Reinitialize the database
-        state_manager = SQLiteStateManager()
-        logger.info("State database reinitialized")
+        state_manager._init_db()
+        logger.debug("State database reinitialized")
     
     return state_manager
 

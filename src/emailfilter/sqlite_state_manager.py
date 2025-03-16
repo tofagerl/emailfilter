@@ -33,7 +33,7 @@ class SQLiteStateManager:
         # Initialize database
         self._init_db()
         
-        logger.info(f"SQLite state manager initialized with database at {self.db_file_path}")
+        logger.debug(f"SQLite state manager initialized with database at {self.db_file_path}")
     
     def _init_db(self) -> None:
         """Initialize the SQLite database and handle migrations."""
@@ -59,24 +59,29 @@ class SQLiteStateManager:
             
             # Add new columns if they don't exist
             if 'from_addr' not in columns:
-                logger.info("Adding 'from_addr' column to database")
                 cursor.execute("ALTER TABLE processed_emails ADD COLUMN from_addr TEXT")
+                conn.commit()
+                logger.debug("Adding 'from_addr' column to database")
             
             if 'to_addr' not in columns:
-                logger.info("Adding 'to_addr' column to database")
                 cursor.execute("ALTER TABLE processed_emails ADD COLUMN to_addr TEXT")
+                conn.commit()
+                logger.debug("Adding 'to_addr' column to database")
             
             if 'subject' not in columns:
-                logger.info("Adding 'subject' column to database")
                 cursor.execute("ALTER TABLE processed_emails ADD COLUMN subject TEXT")
+                conn.commit()
+                logger.debug("Adding 'subject' column to database")
             
             if 'date' not in columns:
-                logger.info("Adding 'date' column to database")
                 cursor.execute("ALTER TABLE processed_emails ADD COLUMN date TEXT")
+                conn.commit()
+                logger.debug("Adding 'date' column to database")
             
             if 'category' not in columns:
-                logger.info("Adding 'category' column to database")
                 cursor.execute("ALTER TABLE processed_emails ADD COLUMN category TEXT")
+                conn.commit()
+                logger.debug("Adding 'category' column to database")
             
             # Create index for faster lookups
             cursor.execute('''
@@ -104,7 +109,7 @@ class SQLiteStateManager:
             
             conn.commit()
             conn.close()
-            logger.info(f"SQLite database initialized at {self.db_file_path}")
+            logger.debug(f"SQLite database initialized at {self.db_file_path}")
         except Exception as e:
             logger.error(f"Error initializing SQLite database: {e}")
             raise
@@ -319,7 +324,7 @@ class SQLiteStateManager:
             conn.commit()
             conn.close()
             
-            logger.info(f"Deleted {deleted_count} entries for account {account_name}")
+            logger.debug(f"Deleted {deleted_count} entries for account {account_name}")
             return deleted_count
         except Exception as e:
             logger.error(f"Error deleting entries for account {account_name}: {e}")
