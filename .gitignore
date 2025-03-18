@@ -20,14 +20,33 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
+# Virtual Environment
 .env
 .venv
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
+
+# Training data and models
+data/
+models/
+*.eml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Local development
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # Nix
 .direnv/
@@ -37,13 +56,6 @@ result-*
 # Logs and state
 logs/
 .emailfilter/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
 
 # Testing
 .coverage
