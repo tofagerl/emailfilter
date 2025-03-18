@@ -6,10 +6,11 @@ import logging
 import os
 import sys
 from typing import Dict, List, Optional
+from pathlib import Path
 
-from emailfilter import categorizer
+from .models import Account, Category, ProcessingOptions
+from .categorizer import initialize_openai_client
 from emailfilter.email_processor import main as email_processor_main
-from emailfilter.models import Email, EmailAccount, Category
 from emailfilter.sqlite_state_manager import SQLiteStateManager
 
 # Version information
@@ -17,7 +18,7 @@ __version__ = "1.0.0"
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stdout
 )
@@ -38,13 +39,13 @@ def handle_categorize_command(args):
         
         # Initialize OpenAI client from config
         try:
-            categorizer.initialize_openai_client(config_path=args.config)
+            initialize_openai_client(config_path=args.config)
         except Exception as e:
             logger.error(f"Error initializing OpenAI client: {e}")
             sys.exit(1)
         
         # Create a mock account with the appropriate categories
-        mock_account = EmailAccount(
+        mock_account = Account(
             name="CLI",
             email_address="cli@example.com",
             password="",
@@ -74,7 +75,7 @@ def handle_categorize_command(args):
                 ))
             
             # Create mock account
-            mock_account = EmailAccount(
+            mock_account = Account(
                 name="CLI",
                 email_address="cli@example.com",
                 password="",
@@ -144,7 +145,7 @@ def handle_categorize_command(args):
             ]
             
             # Create mock account
-            mock_account = EmailAccount(
+            mock_account = Account(
                 name="CLI",
                 email_address="cli@example.com",
                 password="",

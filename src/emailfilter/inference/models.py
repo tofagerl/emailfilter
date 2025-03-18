@@ -91,7 +91,7 @@ class EmailAccount:
         # Set default categories if none provided
         if self.categories is None:
             self.categories = [
-                Category("SPAM", "Unwanted or malicious emails", "[Spam]"),
+                Category("SPAM", "Unwanted or malicious emails", "Spam"),
                 Category("RECEIPTS", "Purchase confirmations and receipts", "[Receipts]"),
                 Category("PROMOTIONS", "Marketing and promotional emails", "[Promotions]"),
                 Category("UPDATES", "Updates and notifications", "[Updates]"),
