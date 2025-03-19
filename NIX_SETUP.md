@@ -59,8 +59,8 @@ This script will:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/emailfilter.git
-   cd emailfilter
+   git clone https://github.com/yourusername/mailmind.git
+   cd mailmind
    ```
 
 2. Allow direnv to load the environment:

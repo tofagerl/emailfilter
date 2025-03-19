@@ -27,8 +27,8 @@ This project uses [uv](https://github.com/astral-sh/uv) for dependency managemen
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/emailfilter.git
-cd emailfilter
+git clone https://github.com/yourusername/mailmind.git
+cd mailmind
 
 # Create a virtual environment and install dependencies
 uv venv
@@ -46,8 +46,8 @@ You can also run the application using Docker:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/emailfilter.git
-cd emailfilter
+git clone https://github.com/yourusername/mailmind.git
+cd mailmind
 
 # Create and customize your configuration
 cp config/config.yaml.docker config/config.yaml
@@ -65,10 +65,10 @@ The most powerful way to use this application is to run it as a daemon that cont
 
 ```bash
 # Run as a daemon service
-emailfilter daemon --config config.yaml
+mailmind daemon --config config.yaml
 
 # Alternatively, use the imap command with the --daemon flag
-emailfilter imap --config config.yaml --daemon
+mailmind imap --config config.yaml --daemon
 ```
 
 In daemon mode, the application:
@@ -85,22 +85,22 @@ If you prefer to process emails on-demand rather than continuously:
 
 ```bash
 # Process emails from all accounts in your configuration
-emailfilter imap --config config.yaml
+mailmind imap --config config.yaml
 
 # Process emails from a specific account
-emailfilter imap --config config.yaml --account "Personal Gmail"
+mailmind imap --config config.yaml --account "Personal Gmail"
 
 # Process emails from a specific folder
-emailfilter imap --config config.yaml --account "Work Email" --folder "Important"
+mailmind imap --config config.yaml --account "Work Email" --folder "Important"
 
 # Dry run (categorize but don't move emails)
-emailfilter imap --config config.yaml --dry-run
+mailmind imap --config config.yaml --dry-run
 ```
 
 ### Basic Filtering
 
 ```python
-from emailfilter import filter
+from mailmind import filter
 
 # Example usage
 emails = [
@@ -115,8 +115,8 @@ filtered = filter.filter_emails(emails, {"from": "example.com"})
 ### OpenAI GPT-4o-mini powered Categorization
 
 ```python
-from emailfilter import categorizer
-from emailfilter.models import EmailAccount, EmailCategory
+from mailmind import categorizer
+from mailmind.models import EmailAccount, EmailCategory
 
 # Initialize the OpenAI client
 categorizer.initialize_openai_client(api_key="your_openai_api_key")
@@ -154,13 +154,13 @@ print(f"Email category: {results[0]['category']}")  # Likely "RECEIPTS"
 
 ```bash
 # Basic filtering
-emailfilter filter --input emails.json --filter "from:example.com" --output filtered.json
+mailmind filter --input emails.json --filter "from:example.com" --output filtered.json
 
 # Categorize emails using OpenAI GPT-4o-mini
-emailfilter categorize --input emails.json --category inbox --output important_emails.json
+mailmind categorize --input emails.json --category inbox --output important_emails.json
 
 # Categorize all emails into their respective categories
-emailfilter categorize --input emails.json --category all --output categorized.json
+mailmind categorize --input emails.json --category all --output categorized.json
 ```
 
 ## Local State System
@@ -175,15 +175,15 @@ The application uses a local state system to track which emails have been proces
 
 ### How It Works
 
-The local state system stores a unique identifier for each processed email in a SQLite database located at `~/.emailfilter/processed_emails.db`. This identifier is generated based on the email's account, message ID, sender, subject, and date.
+The local state system stores a unique identifier for each processed email in a SQLite database located at `~/.mailmind/processed_emails.db`. This identifier is generated based on the email's account, message ID, sender, subject, and date.
 
 When the application processes emails, it checks this database to determine which emails have already been processed, ensuring that each email is only processed once. The SQLite database provides better performance and data integrity compared to the previous JSON-based approach, especially when dealing with large numbers of emails.
 
 ### Docker Persistence
 
-When running in Docker, the SQLite database is stored at `/home/emailfilter/.emailfilter/processed_emails.db` and is automatically persisted through the `emailfilter_data` volume defined in the `docker-compose.yml` file. This ensures that your processed email state is maintained even if the container is restarted or recreated.
+When running in Docker, the SQLite database is stored at `/home/mailmind/.mailmind/processed_emails.db` and is automatically persisted through the `mailmind_data` volume defined in the `docker-compose.yml` file. This ensures that your processed email state is maintained even if the container is restarted or recreated.
 
-The application uses the `EMAILFILTER_STATE_DIR` environment variable to determine where to store the state database. This is set to `/home/emailfilter/.emailfilter` in the Dockerfile.
+The application uses the `MAILMIND_STATE_DIR` environment variable to determine where to store the state database. This is set to `/home/mailmind/.mailmind` in the Dockerfile.
 
 ### Managing the State
 
@@ -191,19 +191,19 @@ You can manage the local state using the CLI:
 
 ```bash
 # View the current state
-python -m emailfilter.cli state view
+python -m mailmind.cli state view
 
 # View state for a specific account
-python -m emailfilter.cli state view --account "Personal Gmail"
+python -m mailmind.cli state view --account "Personal Gmail"
 
 # Clean up the state (removes entries older than 30 days)
-python -m emailfilter.cli state clean
+python -m mailmind.cli state clean
 
 # Reset the state for all accounts (will cause all emails to be reprocessed)
-python -m emailfilter.cli state reset
+python -m mailmind.cli state reset
 
 # Reset the state for a specific account
-python -m emailfilter.cli state reset --account "Personal Gmail"
+python -m mailmind.cli state reset --account "Personal Gmail"
 ```
 
 ### Testing the State System
@@ -280,7 +280,7 @@ To run the application as a background service on Linux, you can create a system
 
 ```bash
 # Create a systemd service file
-sudo nano /etc/systemd/system/emailfilter.service
+sudo nano /etc/systemd/system/mailmind.service
 ```
 
 Add the following content:
@@ -293,8 +293,8 @@ After=network.target
 [Service]
 Type=simple
 User=yourusername
-WorkingDirectory=/path/to/emailfilter
-ExecStart=/path/to/emailfilter/.venv/bin/emailfilter daemon --config /path/to/emailfilter/config.yaml
+WorkingDirectory=/path/to/mailmind
+ExecStart=/path/to/mailmind/.venv/bin/mailmind daemon --config /path/to/mailmind/config.yaml
 Restart=on-failure
 RestartSec=10
 
@@ -305,9 +305,9 @@ WantedBy=multi-user.target
 Enable and start the service:
 
 ```bash
-sudo systemctl enable emailfilter
-sudo systemctl start emailfilter
-sudo systemctl status emailfilter
+sudo systemctl enable mailmind
+sudo systemctl start mailmind
+sudo systemctl status mailmind
 ```
 
 ### Using Docker
@@ -331,11 +331,9 @@ To customize the Docker configuration, edit the `docker-compose.yml` file:
 version: "3.8"
 
 services:
-  emailfilter:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: emailfilter
+  mailmind:
+    build: .
+    container_name: mailmind
     restart: unless-stopped
     volumes:
       - ./config:/config
@@ -363,13 +361,13 @@ For development with Docker:
 
 ```bash
 # Build the image
-docker build -t emailfilter .
+docker build -t mailmind .
 
 # Run in interactive mode
-docker run -it --rm -v $(pwd)/config:/config emailfilter imap --config /config/config.yaml --dry-run
+docker run -it --rm -v $(pwd)/config:/config mailmind imap --config /config/config.yaml --dry-run
 
 # Run tests in the container
-docker run -it --rm emailfilter pytest
+docker run -it --rm mailmind pytest
 ```
 
 ## Note on API Usage
@@ -407,13 +405,13 @@ If you're using the deprecated functions, here's how to migrate to the new APIs:
 
 ```python
 # Old code
-from emailfilter import categorizer
+from mailmind import categorizer
 categorizer.load_api_key("config.yaml")
 category = categorizer.categorize_email(email)
 
 # New code
-from emailfilter import categorizer
-from emailfilter.models import EmailAccount, EmailCategory
+from mailmind import categorizer
+from mailmind.models import EmailAccount, EmailCategory
 
 # Initialize the client
 categorizer.initialize_openai_client(config_path="config.yaml")

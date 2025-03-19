@@ -6,8 +6,8 @@ import logging
 import argparse
 from datetime import datetime
 
-from emailfilter.sqlite_state_manager import SQLiteStateManager
-from emailfilter.models import Email
+from mailmind.sqlite_state_manager import SQLiteStateManager
+from mailmind.models import Email
 
 # Configure logging
 logging.basicConfig(

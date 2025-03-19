@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from imapclient import IMAPClient
 
-from emailfilter import categorizer
+from mailmind import categorizer
 from .models import Email, EmailAccount, ProcessingOptions
 from .config_manager import ConfigManager
 from .sqlite_state_manager import SQLiteStateManager
@@ -20,6 +20,37 @@ logger = logging.getLogger(__name__)
 
 # Global flag for controlling the continuous monitoring
 running = True
+
+def filter_emails(
+    emails: List[Dict[str, str]], 
+    filters: Optional[Dict[str, str]] = None
+) -> List[Dict[str, str]]:
+    """
+    Filter emails based on provided criteria.
+    
+    Args:
+        emails: List of email dictionaries with keys like 'subject', 'from', 'body', etc.
+        filters: Dictionary of filter criteria (e.g., {'from': 'example.com'})
+        
+    Returns:
+        List of emails that match the filter criteria
+    """
+    if not filters:
+        return emails
+    
+    filtered_emails = []
+    
+    for email in emails:
+        matches = True
+        for key, value in filters.items():
+            if key not in email or value not in email[key]:
+                matches = False
+                break
+        
+        if matches:
+            filtered_emails.append(email)
+    
+    return filtered_emails
 
 class EmailProcessor:
     """Processes emails from IMAP accounts."""

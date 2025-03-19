@@ -127,3 +127,5 @@ dmypy.json
 .uv/
 
 config.yaml
+
+.mailmind/

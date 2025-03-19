@@ -1,6 +1,6 @@
 """Tests for the filter module."""
 
-from emailfilter import filter
+from mailmind import filter
 
 
 def test_filter_emails():

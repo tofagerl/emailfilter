@@ -22,7 +22,7 @@ class SQLiteStateManager:
         """
         if db_file_path is None:
             # Use environment variable if set, otherwise use default path
-            state_dir = os.environ.get('EMAILFILTER_STATE_DIR', os.path.expanduser("~/.emailfilter"))
+            state_dir = os.environ.get('MAILMIND_STATE_DIR', os.path.expanduser("~/.mailmind"))
             db_file_path = os.path.join(state_dir, "processed_emails.db")
             
         self.db_file_path = db_file_path

@@ -7,8 +7,8 @@ from unittest import mock
 
 import pytest
 
-from emailfilter import categorizer
-from emailfilter.models import EmailAccount, Category
+from mailmind import categorizer
+from mailmind.models import EmailAccount, Category
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ def test_email_category_enum():
 
 
 @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"})
-@mock.patch("emailfilter.categorizer.OpenAI")
+@mock.patch("mailmind.categorizer.OpenAI")
 def test_initialize_openai_client(mock_openai):
     """Test the initialize_openai_client function."""
     # Reset the global categorizer
@@ -425,7 +425,7 @@ def test_validate_category(mock_categorizer):
     
     # Test with invalid category
     result = {"category": "INVALID", "confidence": 95}
-    with mock.patch("emailfilter.categorizer.logger") as mock_logger:
+    with mock.patch("mailmind.categorizer.logger") as mock_logger:
         normalized = mock_categorizer._validate_category(result, valid_categories)
         assert normalized["category"] == "INBOX"  # Should default to INBOX
         mock_logger.warning.assert_called_once_with("Invalid category: INVALID, defaulting to INBOX")
@@ -456,7 +456,7 @@ def test_parse_response(mock_categorizer, category_objects):
     # Test with invalid JSON
     with mock.patch.object(mock_categorizer, "_extract_json_objects", return_value=["invalid json"]):
         with mock.patch.object(mock_categorizer, "_parse_json_object", side_effect=json.JSONDecodeError("Invalid JSON", "", 0)):
-            with mock.patch("emailfilter.categorizer.logger") as mock_logger:
+            with mock.patch("mailmind.categorizer.logger") as mock_logger:
                 results = mock_categorizer._parse_response("invalid", category_objects, 1)
                 assert len(results) == 1
                 assert results[0]["category"] == "INBOX"
@@ -474,7 +474,7 @@ def test_parse_response(mock_categorizer, category_objects):
     
     # Test with exception during parsing
     with mock.patch.object(mock_categorizer, "_extract_json_objects", side_effect=Exception("Test error")):
-        with mock.patch("emailfilter.categorizer.logger") as mock_logger:
+        with mock.patch("mailmind.categorizer.logger") as mock_logger:
             results = mock_categorizer._parse_response("invalid", category_objects, 1)
             assert len(results) == 1
             assert results[0]["category"] == "INBOX"
