@@ -1,44 +1,4 @@
 services:
-  emailfilter:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: emailfilter
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - TZ=${TZ:-UTC}
-    volumes:
-      - ./config:/config
-      - /raid/media/config/emailfilter:/home/emailfilter
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
-    # Explicit healthcheck
-    healthcheck:
-      test: ["CMD", "emailfilter", "--version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
-    # Logging configuration
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    # Uncomment to run in one-time processing mode instead of daemon mode
-    # command: ["imap", "--config", "/config/config.yaml"]
-    # Uncomment to run with specific options
-    # command: ["imap", "--config", "/config/config.yaml", "--dry-run"]
-
   mailmind:
     build: .
     container_name: mailmind

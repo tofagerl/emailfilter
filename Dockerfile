@@ -41,10 +41,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=UTC
 
 # Create non-root user and required directories
-RUN addgroup -S emailfilter && \
-    adduser -S -G emailfilter emailfilter && \
-    mkdir -p /config /home/emailfilter/logs /home/emailfilter/.emailfilter && \
-    chown -R emailfilter:emailfilter /config /home/emailfilter
+RUN addgroup -S mailmind && \
+    adduser -S -G mailmind mailmind && \
+    mkdir -p /config /home/mailmind/logs /home/mailmind/.mailmind && \
+    chown -R mailmind:mailmind /config /home/mailmind
 
 # Copy wheels and project files from builder stage
 COPY --from=builder /app/wheels /wheels
@@ -52,32 +52,32 @@ COPY src ./src/
 
 # Install the package from wheels
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --no-index --find-links=/wheels emailfilter && \
+    pip install --no-cache-dir --no-index --find-links=/wheels mailmind && \
     rm -rf /wheels
 
 # Set volume for configuration
 VOLUME /config
 # Set volume for persistent data including SQLite database
-VOLUME /home/emailfilter
+VOLUME /home/mailmind
 
 # Add metadata
 LABEL version="1.0.0" \
-      description="Email filtering and categorization tool"
+    description="Email filtering and categorization tool"
 
 # Set environment variable for logs directory
-ENV EMAILFILTER_LOGS_DIR=/home/emailfilter/logs
+ENV MAILMIND_LOGS_DIR=/home/mailmind/logs
 # Set environment variable for state directory
-ENV EMAILFILTER_STATE_DIR=/home/emailfilter/.emailfilter
+ENV MAILMIND_STATE_DIR=/home/mailmind/.mailmind
 
 # Add a healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD emailfilter --version || exit 1
+    CMD mailmind --version || exit 1
 
 # Switch to non-root user
-USER emailfilter
+USER mailmind
 
 # Set entrypoint
-ENTRYPOINT ["emailfilter"]
+ENTRYPOINT ["mailmind"]
 
 # Default command (can be overridden)
 CMD ["imap", "--config", "/config/config.yaml", "--daemon"] 
