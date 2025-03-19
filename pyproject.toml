@@ -1,43 +1,65 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "emailfilter"
+name = "mailmind"
 version = "0.1.0"
-description = "Email filtering application"
-readme = "README.md"
-requires-python = ">=3.8"
-license = { text = "MIT" }
-authors = [{ name = "Tom Fagerland"}]
+description = "An AI-powered email management and categorization tool"
+authors = [{ name = "Tom Fagerland", email = "tom@fager.land" }]
 dependencies = [
-  "openai>=1.0.0",
-  "python-dotenv>=1.0.0",
-  "imapclient>=2.3.0",
-  "email-validator>=2.0.0",
-  "pyyaml>=6.0.0",
+  "torch>=2.0.0",
+  "transformers>=4.30.0",
+  "imapclient>=2.3.1",
+  "pyyaml>=6.0.1",
+  "tqdm>=4.65.0",
+  "numpy>=1.24.0",
+  "pandas>=2.0.0",
+  "scikit-learn>=1.3.0",
+  "matplotlib>=3.7.0",
+  "seaborn>=0.12.0",
+  "wandb>=0.15.0",
+  "pytest>=7.4.0",
+  "pytest-cov>=4.1.0",
+  "black>=23.7.0",
+  "isort>=5.12.0",
+  "flake8>=6.1.0",
+  "mypy>=1.5.0",
 ]
+requires-python = ">=3.8"
+readme = "README.md"
+license = { text = "MIT" }
 
-[project.optional-dependencies]
-dev = ["pytest>=7.0.0", "black>=23.0.0", "isort>=5.12.0", "mypy>=1.0.0"]
+[project.urls]
+Homepage = "https://github.com/tomfagerland/mailmind"
+Repository = "https://github.com/tomfagerland/mailmind.git"
 
-[project.scripts]
-emailfilter = "emailfilter.cli:main"
+[tool.setuptools]
+package-dir = { "" = "src" }
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/emailfilter"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mailmind*"]
+namespaces = false
 
 [tool.black]
-line-length = 88
+line-length = 100
 target-version = ["py38"]
+include = '\.pyi?$'
 
 [tool.isort]
 profile = "black"
-line_length = 88
+multi_line_output = 3
+line_length = 100
 
 [tool.mypy]
 python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
-disallow_incomplete_defs = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=mailmind --cov-report=term-missing"

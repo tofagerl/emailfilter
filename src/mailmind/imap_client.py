@@ -108,11 +108,12 @@ class EmailProcessor:
         # Load configuration
         self._load_config()
         
-        # Load OpenAI API key from config
+        # Initialize categorizer
         try:
-            categorizer.load_api_key(self.config_path)
-        except ValueError as e:
-            logger.error(f"Error loading OpenAI API key: {e}")
+            categorizer.initialize_categorizer()
+            logger.info("Categorizer initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing categorizer: {e}")
             raise
 
     def _load_config(self) -> None:
@@ -142,9 +143,6 @@ class EmailProcessor:
             self.idle_timeout = options_config.get("idle_timeout", 1740)  # 29 minutes
             self.reconnect_delay = options_config.get("reconnect_delay", 5)
             self.max_emails_per_run = options_config.get("max_emails_per_run", 100)
-            
-            # Initialize OpenAI client
-            categorizer.initialize_openai_client(config_path=self.config_path)
             
             logger.debug(f"Loaded configuration from {self.config_path}")
             logger.debug(f"Loaded {len(self.accounts)} accounts")

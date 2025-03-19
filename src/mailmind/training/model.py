@@ -183,18 +183,14 @@ class EmailCategorizationModel:
             pad_token_id=0  # Will be updated when we load tokenizer
         )
         
-        # Load adapter weights
-        model = PeftModel.from_pretrained(model, model_dir)
-        
         # Create instance
         instance = cls(
-            model_name=str(model_dir),
+            model_name="microsoft/phi-2",  # Use base model name
             num_labels=num_labels,
             device=device
         )
         
         # Load saved weights
         instance.model = model.to(device)
-        instance.tokenizer = AutoTokenizer.from_pretrained(model_dir)
         
         return instance 

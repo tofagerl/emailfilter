@@ -83,6 +83,8 @@ class Account:
     ssl: bool = True
     folders: List[str] = None
     categories: List[Category] = None
+    source_folder: str = "INBOX"
+    max_emails: int = 100
     
     def __post_init__(self):
         if self.folders is None:

@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 from .models import Account, Category, ProcessingOptions
-from .categorizer import initialize_openai_client
+from .categorizer import initialize_categorizer
 from mailmind.email_processor import main as email_processor_main
 from mailmind.sqlite_state_manager import SQLiteStateManager
 from mailmind.filter import filter_emails
@@ -42,12 +42,13 @@ def handle_categorize_command(args):
             logger.error("No emails found in input file")
             sys.exit(1)
         
-        # Initialize OpenAI client from config
+        # Initialize categorizer
         try:
-            initialize_openai_client(config_path=args.config)
+            initialize_categorizer()
+            logger.info("Categorizer initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing OpenAI client: {e}")
-            sys.exit(1)
+            logger.error(f"Error initializing categorizer: {e}")
+            raise
         
         # Create a mock account with the appropriate categories
         mock_account = Account(

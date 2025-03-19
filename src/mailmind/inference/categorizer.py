@@ -13,26 +13,22 @@ from ..training.model import EmailCategorizationModel
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Fixed model path
+MODEL_PATH = Path(__file__).parent / "models" / "email-classifier-v2"
+
 class EmailCategorizer:
     """Categorizes emails using trained model."""
     
-    def __init__(self, model_dir: Optional[str] = None):
-        """Initialize the email categorizer.
-        
-        Args:
-            model_dir: Directory containing the trained model
-        """
-        if model_dir is None:
-            model_dir = os.environ.get("MODEL_PATH", "models/email-classifier")
-        
-        self.model_dir = Path(model_dir)
+    def __init__(self):
+        """Initialize the email categorizer."""
+        self.model_dir = MODEL_PATH
         self.device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         
         # Load model and tokenizer
         self.model = EmailCategorizationModel.load(self.model_dir, self.device)
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_dir)
+        self.tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2")
         
-        logger.info(f"Loaded model from {model_dir} using {self.device} device")
+        logger.info(f"Loaded model from {self.model_dir} using {self.device} device")
     
     def _prepare_email_text(self, email: Dict[str, str]) -> str:
         """Prepare email text for the model.
@@ -100,25 +96,23 @@ Body: {email.get('body', '')}"""
 _global_categorizer = None
 
 
-def initialize_categorizer(model_dir: Optional[str] = None) -> None:
+def initialize_categorizer() -> None:
     """Initialize the global categorizer instance."""
     global _global_categorizer
-    _global_categorizer = EmailCategorizer(model_dir)
+    _global_categorizer = EmailCategorizer()
 
 
 def batch_categorize_emails_for_account(
     emails: List[Dict[str, str]],
     account: Any,
-    batch_size: int = 8,
-    model: Optional[str] = None
+    batch_size: int = 8
 ) -> List[Dict[str, Any]]:
-    """Categorize emails for an account (backward compatibility).
+    """Categorize emails for an account.
     
     Args:
         emails: List of email dictionaries
         account: Account object (ignored, kept for compatibility)
         batch_size: Batch size for processing
-        model: Model name (ignored, kept for compatibility)
         
     Returns:
         List of dictionaries with categorization results

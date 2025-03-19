@@ -7,11 +7,12 @@ import sys
 import threading
 import time
 from typing import Dict, List, Optional, Tuple, Any
+from pathlib import Path
 
 from imapclient import IMAPClient
 
-from mailmind import categorizer
-from .models import Email, EmailAccount, ProcessingOptions
+from mailmind.inference.categorizer import batch_categorize_emails_for_account, initialize_categorizer
+from mailmind.inference.models import Email, Account, ProcessingOptions
 from .config_manager import ConfigManager
 from .sqlite_state_manager import SQLiteStateManager
 from .imap_manager import IMAPManager
@@ -39,12 +40,12 @@ class EmailProcessor:
         # Set up IMAP manager
         self.imap_manager = IMAPManager()
         
-        # Initialize OpenAI client
+        # Initialize categorizer
         try:
-            categorizer.initialize_openai_client(api_key=self.config_manager.openai_api_key)
-            logger.debug("OpenAI client initialized successfully")
+            initialize_categorizer()
+            logger.debug("Categorizer initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing OpenAI client: {e}")
+            logger.error(f"Error initializing categorizer: {e}")
             raise
     
     def categorize_emails(
@@ -54,7 +55,7 @@ class EmailProcessor:
         account,
         batch_size: int = 10,
     ) -> Dict[int, Tuple[Email, str]]:
-        """Categorize emails using the OpenAI API.
+        """Categorize emails using the model.
         
         Args:
             client: The IMAPClient object
@@ -90,12 +91,11 @@ class EmailProcessor:
             
             try:
                 # Categorize batch
-                logger.info(f"Categorizing batch of {len(batch_emails)} emails using {self.config_manager.options.model}")
-                results = categorizer.batch_categorize_emails_for_account(
+                logger.info(f"Categorizing batch of {len(batch_emails)} emails")
+                results = batch_categorize_emails_for_account(
                     batch_emails, 
                     account, 
-                    batch_size,
-                    self.config_manager.options.model
+                    batch_size
                 )
                 
                 # Process results
@@ -169,88 +169,80 @@ class EmailProcessor:
         
         return category_counts
     
-    def process_account(self, account: EmailAccount) -> Dict[str, Dict[str, int]]:
-        """Process emails for a single account.
+    def process_account(self, account: Account) -> Dict[str, Dict[str, int]]:
+        """Process emails for an account.
         
         Args:
-            account: The email account to process
+            account: Account to process
             
         Returns:
-            Dictionary mapping folders to dictionaries mapping categories to counts
+            Dictionary mapping categories to counts of emails moved
         """
-        results = {}
-        
-        # Connect to account
+        # Connect to IMAP server
         client = self.imap_manager.connect(account)
         if not client:
-            logger.error(f"Failed to connect to {account}")
-            return results
+            return {}
         
         try:
-            # Process each folder
-            for folder in account.folders:
-                try:
-                    # Get all emails
-                    emails = self.imap_manager.get_emails(
-                        client, 
-                        folder, 
-                        self.config_manager.options.max_emails_per_run
-                    )
-                    
-                    # Filter out already processed emails
-                    unprocessed_emails = {}
-                    for msg_id, email_obj in emails.items():
-                        if not self.state_manager.is_email_processed(account.name, email_obj):
-                            unprocessed_emails[msg_id] = email_obj
-                    
-                    if not unprocessed_emails:
-                        logger.debug(f"No unprocessed emails in {folder}")
-                        continue
-                    
-                    # Categorize emails
-                    categorized_emails = self.categorize_emails(
-                        client,
-                        unprocessed_emails,
-                        account,
-                        self.config_manager.options.batch_size
-                    )
-                    
-                    # Process categorized emails
-                    category_counts = self.process_categorized_emails(
-                        client,
-                        categorized_emails,
-                        account,
-                        folder
-                    )
-                    
-                    results[folder] = category_counts
-                except Exception as e:
-                    logger.error(f"Error processing folder {folder}: {e}")
+            # Get emails from source folder
+            emails = self.imap_manager.get_emails(
+                client,
+                account.source_folder,
+                max_emails=account.max_emails
+            )
+            
+            if not emails:
+                logger.info(f"No emails found in {account.source_folder}")
+                return {}
+            
+            # Filter out already processed emails
+            unprocessed_emails = {}
+            for msg_id, email in emails.items():
+                if not self.state_manager.is_processed(email.message_id):
+                    unprocessed_emails[msg_id] = email
+            
+            if not unprocessed_emails:
+                logger.info("No unprocessed emails found")
+                return {}
+            
+            # Categorize emails
+            categorized_emails = batch_categorize_emails_for_account(
+                list(unprocessed_emails.values()),
+                account
+            )
+            
+            # Move emails to category folders
+            results = {}
+            for category in account.categories:
+                results[category.name] = {"moved": 0}
+            
+            for msg_id, email in unprocessed_emails.items():
+                if email.message_id not in categorized_emails:
+                    continue
+                
+                category = categorized_emails[email.message_id]
+                target_folder = account.get_folder_for_category(category)
+                
+                if not target_folder:
+                    logger.warning(f"No folder found for category {category}")
+                    continue
+                
+                if self.imap_manager.move_email(client, msg_id, target_folder):
+                    results[category]["moved"] += 1
+                    self.state_manager.mark_processed(email.message_id)
             
             return results
         finally:
-            # Clean up
             self.imap_manager.disconnect(account.name)
     
-    def process_all_accounts(self) -> Dict[str, Dict[str, Dict[str, int]]]:
-        """Process emails for all accounts.
-        
-        Returns:
-            Dictionary mapping account names to dictionaries mapping folders to dictionaries mapping categories to counts
-        """
-        results = {}
-        
+    def process_all_accounts(self) -> None:
+        """Process all configured accounts."""
         for account in self.config_manager.accounts:
-            try:
-                account_results = self.process_account(account)
-                results[account.name] = account_results
-            except Exception as e:
-                logger.error(f"Error processing account {account}: {e}")
-        
-        # Clean up old entries
-        self.state_manager.cleanup_old_entries()
-        
-        return results
+            logger.info(f"Processing account: {account.name}")
+            results = self.process_account(account)
+            
+            for category, counts in results.items():
+                logger.info(f"Category {category}: moved {counts['moved']} emails")
     
     def start_monitoring(self) -> None:
         """Start monitoring email accounts continuously."""
@@ -286,7 +278,7 @@ class EmailProcessor:
             for thread in threads:
                 thread.join(timeout=5)
     
-    def _monitor_account(self, account: EmailAccount) -> None:
+    def _monitor_account(self, account: Account) -> None:
         """Monitor an email account continuously.
         
         Args:
@@ -442,16 +434,7 @@ def main(config_path: str, daemon_mode: bool = False) -> None:
             processor.start_monitoring()
         else:
             logger.info("Processing emails (one-time run)")
-            results = processor.process_all_accounts()
-            
-            # Print results
-            for account_name, account_results in results.items():
-                print(f"Results for {account_name}:")
-                for folder, category_counts in account_results.items():
-                    print(f"  Folder: {folder}")
-                    for category, count in category_counts.items():
-                        if count > 0:
-                            print(f"    {category}: {count}")
+            processor.process_all_accounts()
     except Exception as e:
         logger.error(f"Error in main: {e}")
         sys.exit(1) 
