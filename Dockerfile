@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13.2-slim
 
 WORKDIR /app
 
@@ -22,5 +22,5 @@ ENV PYTHONPATH=/app/src
 ENV MODEL_PATH=/app/models/email-classifier
 
 # Default command (can be overridden)
-ENTRYPOINT ["python", "-m", "emailfilter.inference.cli"]
+ENTRYPOINT ["python", "-m", "mailmind.inference.cli"]
 CMD ["--help"] 

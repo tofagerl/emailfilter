@@ -55,7 +55,7 @@ result-*
 
 # Logs and state
 logs/
-.emailfilter/
+.mailmind/
 
 # Testing
 .coverage

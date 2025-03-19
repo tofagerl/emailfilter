@@ -1,40 +1,41 @@
-#!/usr/bin/env python
-"""Test script to demonstrate the local state system for tracking processed emails."""
+#!/usr/bin/env python3
+"""Test script for the local state system."""
 
-import os
-import logging
 import argparse
-from datetime import datetime
+import logging
+import sys
+from datetime import datetime, timedelta
+from typing import List, Optional
 
-from emailfilter.sqlite_state_manager import SQLiteStateManager
-from emailfilter.models import Email
+from mailmind.sqlite_state_manager import SQLiteStateManager
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
 
-def parse_args():
-    """Parse command-line arguments."""
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Test the local state system")
     parser.add_argument(
-        "--action",
+        "action",
         choices=["view", "add", "clean", "reset"],
-        default="view",
-        help="Action to perform on the state"
+        help="Action to perform"
     )
     parser.add_argument(
         "--account",
         type=str,
-        help="Account to use for testing"
+        help="Account name for add/reset actions"
     )
     parser.add_argument(
         "--count",
         type=int,
         default=5,
-        help="Number of test emails to add to the state"
+        help="Number of test emails to add (default: 5)"
     )
     parser.add_argument(
         "--max-age-days",
@@ -44,73 +45,55 @@ def parse_args():
     )
     return parser.parse_args()
 
-def view_state(state_manager):
+
+def view_state(state_manager: SQLiteStateManager) -> None:
     """View the current state."""
-    logger.debug("Current state:")
+    logger.info("Current state:")
+    entries = state_manager.get_all_entries()
     
-    accounts = state_manager.get_accounts()
-    if not accounts:
-        logger.debug("  No accounts found in state")
+    if not entries:
+        logger.info("No entries found")
         return
     
-    total = 0
-    for account in accounts:
-        count = state_manager.get_processed_count(account)
-        total += count
-        logger.debug(f"  Account: {account}")
-        logger.debug(f"    Processed emails: {count}")
-    
-    logger.debug(f"Total processed emails: {total}")
+    for entry in entries:
+        logger.info(f"Entry: {entry}")
 
-def add_test_emails(state_manager, account_name, count):
+
+def add_test_emails(state_manager: SQLiteStateManager, account: str, count: int) -> None:
     """Add test emails to the state."""
-    logger.debug(f"Adding {count} test emails to state for account '{account_name}'")
+    logger.info(f"Adding {count} test emails for account: {account}")
     
-    # Create test emails
     for i in range(count):
-        # Create a test email
-        email = Email(
-            subject=f"Test Email {i+1}",
-            from_addr="test@example.com",
-            to_addr="user@example.com",
-            date=datetime.now().isoformat(),
-            body=f"This is test email {i+1}",
-            raw_message=b"",
-            msg_id=i+1000,
-            folder="INBOX"
+        email_id = f"test_email_{i}"
+        state_manager.add_entry(
+            account=account,
+            message_id=email_id,
+            sender=f"test{i}@example.com",
+            subject=f"Test Email {i}",
+            date=datetime.now() - timedelta(days=i)
         )
-        
-        # Mark it as processed
-        state_manager.mark_email_as_processed(account_name, email)
-        
-    logger.debug(f"Added {count} test emails to state")
-
-def clean_state(state_manager, max_age_days):
-    """Clean up old state entries."""
-    logger.debug(f"Cleaning up state entries older than {max_age_days} days")
-    state_manager.cleanup_old_entries(max_age_days)
     
-    # Show the current state after cleanup
-    view_state(state_manager)
+    logger.info("Test emails added successfully")
 
-def reset_state(state_manager, account_name=None):
-    """Reset the state for an account or all accounts."""
-    if account_name:
-        logger.debug(f"Resetting state for account '{account_name}'")
-        deleted = state_manager.delete_account_entries(account_name)
-        logger.debug(f"Reset state for account '{account_name}'. Deleted {deleted} entries.")
+
+def clean_state(state_manager: SQLiteStateManager, max_age_days: int) -> None:
+    """Clean up old state entries."""
+    logger.info(f"Cleaning state entries older than {max_age_days} days")
+    state_manager.clean_old_entries(max_age_days)
+    logger.info("State cleaned successfully")
+
+
+def reset_state(state_manager: SQLiteStateManager, account: Optional[str] = None) -> SQLiteStateManager:
+    """Reset the state for all accounts or a specific account."""
+    if account:
+        logger.info(f"Resetting state for account: {account}")
+        state_manager.reset_account(account)
     else:
-        logger.debug("Resetting state for all accounts")
-        # Delete the database file
-        if os.path.exists(state_manager.db_file_path):
-            os.remove(state_manager.db_file_path)
-            logger.debug("State database deleted")
-        
-        # Reinitialize the database
-        state_manager._init_db()
-        logger.debug("State database reinitialized")
+        logger.info("Resetting state for all accounts")
+        state_manager.reset_all()
     
     return state_manager
+
 
 def main():
     """Run the test script."""
@@ -137,6 +120,7 @@ def main():
     elif args.action == "reset":
         state_manager = reset_state(state_manager, args.account)
         view_state(state_manager)
+
 
 if __name__ == "__main__":
     main() 

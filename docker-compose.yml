@@ -1,17 +1,20 @@
+version: "3.8"
+
 services:
-  emailfilter:
+  mailmind:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: emailfilter
+    container_name: mailmind
     restart: unless-stopped
     env_file:
       - .env
     environment:
       - TZ=${TZ:-UTC}
+      - MAILMIND_STATE_DIR=/home/mailmind
     volumes:
       - ./config:/config
-      - /raid/media/config/emailfilter:/home/emailfilter
+      - /raid/media/config/mailmind:/home/mailmind
     # Resource limits
     deploy:
       resources:
@@ -23,7 +26,7 @@ services:
           memory: 256M
     # Explicit healthcheck
     healthcheck:
-      test: ["CMD", "emailfilter", "--version"]
+      test: ["CMD", "mailmind", "--version"]
       interval: 30s
       timeout: 10s
       retries: 3

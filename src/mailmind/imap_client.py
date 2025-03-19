@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import yaml
 from imapclient import IMAPClient
 
-from emailfilter import categorizer
+from mailmind import categorizer
 from .sqlite_state_manager import SQLiteStateManager
 from .models import Email as EmailModel
 
@@ -777,7 +777,7 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python -m emailfilter.imap_client <config_path> [--daemon]")
+        print("Usage: python -m mailmind.imap_client <config_path> [--daemon]")
         sys.exit(1)
     
     config_path = sys.argv[1]

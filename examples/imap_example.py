@@ -7,9 +7,9 @@ from typing import Dict, List
 from pprint import pprint
 
 # Use the new email_processor module instead of the deprecated imap_client
-from emailfilter.email_processor import EmailProcessor
-from emailfilter.models import EmailAccount
-from emailfilter.categorizer import EmailCategory
+from mailmind.email_processor import EmailProcessor
+from mailmind.models import EmailAccount
+from mailmind.categorizer import EmailCategory
 
 # Get the directory of this script
 script_dir: str = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +29,7 @@ if not os.path.exists(config_path):
     print(f"\nExample configuration file format can be found at: {config_example}")
     sys.exit(1)
 
-print("Email Filter - IMAP Processing Example")
+print("Mailmind - IMAP Processing Example")
 print("=" * 50)
 print(f"Using configuration file: {config_path}")
 

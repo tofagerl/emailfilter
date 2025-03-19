@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from imapclient import IMAPClient
 
-from emailfilter import categorizer
+from mailmind import categorizer
 from .models import Email, EmailAccount, ProcessingOptions
 from .config_manager import ConfigManager
 from .sqlite_state_manager import SQLiteStateManager

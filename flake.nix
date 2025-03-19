@@ -57,7 +57,7 @@
             }
             
             # Install the package in development mode with all dependencies
-            if ! pip show emailfilter &> /dev/null; then
+            if ! pip show mailmind &> /dev/null; then
               echo "Installing package in development mode..."
               pip install -e ".[dev]"
             fi

@@ -73,7 +73,7 @@ class Email:
                 return ""
 
 @dataclass
-class EmailAccount:
+class Account:
     """Represents an email account configuration."""
     name: str
     email_address: str

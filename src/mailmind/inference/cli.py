@@ -1,4 +1,4 @@
-"""Command-line interface for emailfilter."""
+"""Command-line interface for mailmind."""
 
 import argparse
 import json
@@ -10,8 +10,9 @@ from pathlib import Path
 
 from .models import Account, Category, ProcessingOptions
 from .categorizer import initialize_openai_client
-from emailfilter.email_processor import main as email_processor_main
-from emailfilter.sqlite_state_manager import SQLiteStateManager
+from mailmind.email_processor import main as email_processor_main
+from mailmind.sqlite_state_manager import SQLiteStateManager
+from mailmind.filter import filter_emails
 
 # Version information
 __version__ = "1.0.0"
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def handle_version_command(args):
     """Handle the version command."""
-    print(f"emailfilter version {__version__}")
+    print(f"mailmind version {__version__}")
 
 
 def handle_categorize_command(args):
@@ -36,6 +37,10 @@ def handle_categorize_command(args):
         # Load emails from input file
         with open(args.input, "r") as f:
             emails = json.load(f)
+        
+        if not emails:
+            logger.error("No emails found in input file")
+            sys.exit(1)
         
         # Initialize OpenAI client from config
         try:
@@ -51,7 +56,7 @@ def handle_categorize_command(args):
             password="",
             imap_server="",
             categories=[
-                Category("SPAM", "Unwanted or malicious emails", "[Spam]"),
+                Category("SPAM", "Unwanted or malicious emails", "Spam"),
                 Category("RECEIPTS", "Purchase confirmations and receipts", "[Receipts]"),
                 Category("PROMOTIONS", "Marketing and promotional emails", "[Promotions]"),
                 Category("UPDATES", "Updates and notifications", "[Updates]"),
@@ -60,148 +65,54 @@ def handle_categorize_command(args):
         )
         
         # Categorize emails
-        if args.custom_categories:
-            # Load custom categories from file
-            with open(args.custom_categories, "r") as f:
-                custom_categories_data = json.load(f)
+        if args.category != "all":
+            logger.debug(f"Filtering by category: {args.category}")
             
-            # Create Category objects
-            categories = []
-            for cat in custom_categories_data:
-                categories.append(Category(
-                    name=cat.get("name", "").upper(),
-                    description=cat.get("description", ""),
-                    foldername=cat.get("foldername", "INBOX")
-                ))
+            # Categorize all emails
+            results = []
+            for i in range(0, len(emails), args.batch_size):
+                batch = emails[i:i+args.batch_size]
+                batch_results = categorizer.batch_categorize_emails_for_account(
+                    batch, mock_account, args.batch_size, args.model
+                )
+                results.extend(batch_results)
             
-            # Create mock account
-            mock_account = Account(
-                name="CLI",
-                email_address="cli@example.com",
-                password="",
-                imap_server="",
-                categories=categories
-            )
+            # Filter by category
+            filtered_emails = []
+            for i, email in enumerate(emails):
+                if i < len(results) and results[i]["category"].upper() == args.category.upper():
+                    filtered_emails.append(email)
             
-            # Categorize emails
-            if args.category != "all":
-                logger.debug(f"Filtering by category: {args.category}")
-                
-                # Categorize all emails
-                results = []
-                for i in range(0, len(emails), args.batch_size):
-                    batch = emails[i:i+args.batch_size]
-                    batch_results = categorizer.batch_categorize_emails_for_account(
-                        batch, mock_account, args.batch_size, args.model
-                    )
-                    results.extend(batch_results)
-                
-                # Filter by category
-                filtered_emails = []
-                for i, email in enumerate(emails):
-                    if i < len(results) and results[i]["category"].upper() == args.category.upper():
-                        filtered_emails.append(email)
-                
-                logger.info(f"Found {len(filtered_emails)} emails in category {args.category}")
-                
-                # Write results to output file
-                with open(args.output, "w") as f:
-                    json.dump(filtered_emails, f, indent=2)
-            else:
-                logger.debug("Categorizing emails")
-                
-                # Categorize all emails
-                all_results = {}
-                for cat in categories:
-                    all_results[cat.name.lower()] = []
-                
-                for i in range(0, len(emails), args.batch_size):
-                    batch = emails[i:i+args.batch_size]
-                    batch_results = categorizer.batch_categorize_emails_for_account(
-                        batch, mock_account, args.batch_size, args.model
-                    )
-                    
-                    # Group by category
-                    for j, email in enumerate(batch):
-                        if j < len(batch_results):
-                            category = batch_results[j]["category"].lower()
-                            all_results[category].append(email)
-                
-                # Write results to output file
-                with open(args.output, "w") as f:
-                    json.dump(all_results, f, indent=2)
-                
-                # Print summary
-                for category, emails in all_results.items():
-                    logger.info(f"Category {category}: {len(emails)} emails")
+            logger.info(f"Found {len(filtered_emails)} emails in category {args.category}")
+            
+            # Write results to output file
+            with open(args.output, "w") as f:
+                json.dump(filtered_emails, f, indent=2)
         else:
-            # Use default categories
-            default_categories = [
-                Category("SPAM", "Unwanted or malicious emails", "[Spam]"),
-                Category("RECEIPTS", "Purchase confirmations and receipts", "[Receipts]"),
-                Category("PROMOTIONS", "Marketing and promotional emails", "[Promotions]"),
-                Category("UPDATES", "Updates and notifications", "[Updates]"),
-                Category("INBOX", "Important emails that need attention", "INBOX")
-            ]
+            logger.debug("Categorizing emails")
             
-            # Create mock account
-            mock_account = Account(
-                name="CLI",
-                email_address="cli@example.com",
-                password="",
-                imap_server="",
-                categories=default_categories
-            )
+            # Categorize all emails
+            all_results = {cat.name.lower(): [] for cat in mock_account.categories}
             
-            # Categorize emails
-            if args.category != "all":
-                logger.debug(f"Filtering by category: {args.category}")
+            for i in range(0, len(emails), args.batch_size):
+                batch = emails[i:i+args.batch_size]
+                batch_results = categorizer.batch_categorize_emails_for_account(
+                    batch, mock_account, args.batch_size, args.model
+                )
                 
-                # Categorize all emails
-                results = []
-                for i in range(0, len(emails), args.batch_size):
-                    batch = emails[i:i+args.batch_size]
-                    batch_results = categorizer.batch_categorize_emails_for_account(
-                        batch, mock_account, args.batch_size, args.model
-                    )
-                    results.extend(batch_results)
-                
-                # Filter by category
-                filtered_emails = []
-                for i, email in enumerate(emails):
-                    if i < len(results) and results[i]["category"].upper() == args.category.upper():
-                        filtered_emails.append(email)
-                
-                logger.info(f"Found {len(filtered_emails)} emails in category {args.category}")
-                
-                # Write results to output file
-                with open(args.output, "w") as f:
-                    json.dump(filtered_emails, f, indent=2)
-            else:
-                logger.debug("Categorizing emails")
-                
-                # Categorize all emails
-                all_results = {cat.name.lower(): [] for cat in default_categories}
-                
-                for i in range(0, len(emails), args.batch_size):
-                    batch = emails[i:i+args.batch_size]
-                    batch_results = categorizer.batch_categorize_emails_for_account(
-                        batch, mock_account, args.batch_size, args.model
-                    )
-                    
-                    # Group by category
-                    for j, email in enumerate(batch):
-                        if j < len(batch_results):
-                            category = batch_results[j]["category"].lower()
-                            all_results[category].append(email)
-                
-                # Write results to output file
-                with open(args.output, "w") as f:
-                    json.dump(all_results, f, indent=2)
-                
-                # Print summary
-                for category, emails in all_results.items():
-                    logger.info(f"Category {category}: {len(emails)} emails")
+                # Group by category
+                for j, email in enumerate(batch):
+                    if j < len(batch_results):
+                        category = batch_results[j]["category"].lower()
+                        all_results[category].append(email)
+            
+            # Write results to output file
+            with open(args.output, "w") as f:
+                json.dump(all_results, f, indent=2)
+            
+            # Print summary
+            for category, emails in all_results.items():
+                logger.info(f"Category {category}: {len(emails)} emails")
     except Exception as e:
         logger.error(f"Error categorizing email: {e}")
         sys.exit(1)
@@ -229,7 +140,6 @@ def handle_filter_command(args):
             filters = json.load(f)
         
         # Apply filters
-        from emailfilter.filter import filter_emails
         filtered_emails = filter_emails(emails, filters)
         
         # Write results to output file

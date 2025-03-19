@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Email Filter - A Python application for filtering and processing emails.
+Mailmind - A Python application for intelligent email management.
 
 This is a simple entry point that demonstrates the OpenAI GPT-4o-mini based email categorization.
 """
@@ -10,13 +10,13 @@ import os
 import sys
 from typing import Dict, List, Any
 
-from emailfilter import categorizer
-from emailfilter.models import EmailAccount, Category
+from mailmind import categorizer
+from mailmind.models import EmailAccount, Category
 
 
 def main() -> None:
     """Main entry point for the application."""
-    print("Email Filter - OpenAI GPT-4o-mini powered Email Categorization")
+    print("Mailmind - OpenAI GPT-4o-mini powered Email Categorization")
     print("=" * 50)
     
     # Check if OpenAI API key is set

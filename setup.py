@@ -1,9 +1,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="emailfilter",
+    name="mailmind",
     version="1.0.0",
-    description="A Python application for filtering and processing emails",
+    description="AI-powered email management and categorization tool",
     author="Tom Fagerland",
     author_email="tom.fagerland@schibsted.com",
     packages=find_packages(where="src"),

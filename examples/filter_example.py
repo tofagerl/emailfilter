@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Example script demonstrating how to use the emailfilter package."""
+"""Example script demonstrating how to use the mailmind package."""
 
 import json
 import os
 from typing import Dict, List
 from pprint import pprint
 
-from emailfilter import filter
+from mailmind import filter
 
 # Get the directory of this script
 script_dir = os.path.dirname(os.path.abspath(__file__))
