@@ -38,11 +38,6 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
-# Configuration
-config/
-config.yaml
-*.yaml
-
 # Examples
 examples/
 

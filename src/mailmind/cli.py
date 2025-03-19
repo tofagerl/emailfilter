@@ -19,7 +19,7 @@ def main():
     """Main entry point for the CLI."""
     try:
         # Run the email processor in daemon mode
-        email_processor_main("config.yaml", daemon_mode=True)
+        email_processor_main("/config/config.yaml", daemon_mode=True)
     except Exception as e:
         logger.error(f"Error processing emails: {e}")
         sys.exit(1)
