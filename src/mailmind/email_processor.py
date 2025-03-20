@@ -70,6 +70,10 @@ class EmailProcessor:
         # Set up IMAP manager
         self.imap_manager = IMAPManager()
         
+        # Memory management settings
+        self.max_email_size = 50 * 1024 * 1024  # 50MB max email size
+        self.max_batch_memory = 200 * 1024 * 1024  # 200MB max batch memory
+        
         # Initialize OpenAI client
         try:
             categorizer.initialize_openai_client(api_key=self.config_manager.openai_api_key)
@@ -77,6 +81,40 @@ class EmailProcessor:
         except Exception as e:
             logger.error(f"Error initializing OpenAI client: {e}")
             raise
+    
+    def _estimate_email_size(self, email: Email) -> int:
+        """Estimate the memory size of an email.
+        
+        Args:
+            email: The email to estimate size for
+            
+        Returns:
+            Estimated size in bytes
+        """
+        size = 0
+        size += len(str(email.msg_id))
+        size += len(str(email.from_addr or ''))
+        size += len(str(email.to_addr or ''))
+        size += len(str(email.subject or ''))
+        size += len(str(email.date or ''))
+        size += len(str(email.body or ''))
+        size += sum(len(str(part)) for part in (email.attachments or []))
+        return size
+    
+    def _should_process_email(self, email: Email) -> bool:
+        """Check if an email should be processed based on size limits.
+        
+        Args:
+            email: The email to check
+            
+        Returns:
+            True if email should be processed, False otherwise
+        """
+        size = self._estimate_email_size(email)
+        if size > self.max_email_size:
+            logger.warning(f"Email {email.msg_id} exceeds size limit of {self.max_email_size/1024/1024}MB")
+            return False
+        return True
     
     def categorize_emails(
         self,
@@ -88,61 +126,68 @@ class EmailProcessor:
         """Categorize emails using the OpenAI API.
         
         Args:
-            client: The IMAPClient object
+            client: IMAP client
             emails: Dictionary mapping message IDs to Email objects
-            account: The EmailAccount object with category definitions
-            batch_size: Number of emails to categorize in each batch
+            account: Email account
+            batch_size: Number of emails to process in each batch
             
         Returns:
             Dictionary mapping message IDs to tuples of (Email, category)
         """
-        if not emails:
-            return {}
-        
-        # Convert Email objects to dictionaries for categorizer
-        email_dicts = {
-            msg_id: {
-                "subject": email.subject,
-                "from": email.from_addr,
-                "to": email.to_addr,
-                "date": email.date,
-                "body": email.body
-            } for msg_id, email in emails.items()
-        }
-        
-        # Prepare batches
-        msg_ids = list(emails.keys())
         categorized_emails = {}
+        msg_ids = list(emails.keys())
         
         # Process in batches
         for i in range(0, len(msg_ids), batch_size):
             batch_ids = msg_ids[i:i+batch_size]
-            batch_emails = [email_dicts[msg_id] for msg_id in batch_ids]
+            batch_emails = {}
+            batch_size_bytes = 0
             
+            # Build batch while respecting memory limits
+            for msg_id in batch_ids:
+                email = emails[msg_id]
+                if not self._should_process_email(email):
+                    categorized_emails[msg_id] = (email, "INBOX")  # Default to INBOX
+                    continue
+                    
+                email_size = self._estimate_email_size(email)
+                if batch_size_bytes + email_size > self.max_batch_memory:
+                    logger.warning(f"Batch memory limit reached at {batch_size_bytes/1024/1024}MB")
+                    break
+                    
+                batch_emails[msg_id] = email
+                batch_size_bytes += email_size
+            
+            if not batch_emails:
+                continue
+                
             try:
                 # Categorize batch
                 logger.info(f"Categorizing batch of {len(batch_emails)} emails using {self.config_manager.options.model}")
                 results = categorizer.batch_categorize_emails_for_account(
-                    batch_emails, 
+                    list(batch_emails.values()), 
                     account, 
-                    batch_size,
+                    len(batch_emails),
                     self.config_manager.options.model
                 )
                 
                 # Process results
-                for j, msg_id in enumerate(batch_ids):
+                for j, msg_id in enumerate(batch_emails.keys()):
                     if j < len(results):
                         result = results[j]
-                        # Get category name from result
                         category_name = result.get("category", "INBOX")
                         categorized_emails[msg_id] = (emails[msg_id], category_name)
                     else:
-                        # Fallback if result is missing
                         categorized_emails[msg_id] = (emails[msg_id], "INBOX")
+                        
+                # Clear batch from memory
+                del batch_emails
+                del results
+                
             except Exception as e:
                 logger.error(f"Error categorizing batch: {e}")
                 # Fallback for the entire batch
-                for msg_id in batch_ids:
+                for msg_id in batch_emails:
                     categorized_emails[msg_id] = (emails[msg_id], "INBOX")
         
         return categorized_emails

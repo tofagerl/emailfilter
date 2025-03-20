@@ -2,6 +2,7 @@
 
 import email
 import logging
+import time
 from typing import Dict, List, Optional, Tuple
 
 from imapclient import IMAPClient
@@ -16,6 +17,7 @@ class IMAPManager:
     def __init__(self):
         """Initialize the IMAP manager."""
         self.connections: Dict[str, IMAPClient] = {}
+        self.max_connections = 5  # Limit concurrent connections
     
     def connect(self, account: EmailAccount) -> Optional[IMAPClient]:
         """Connect to an IMAP server.
@@ -32,32 +34,53 @@ class IMAPManager:
                 logger.debug(f"Already connected to {account}")
                 return self.connections[account.name]
             
+            # Clean up old connections if we're at the limit
+            if len(self.connections) >= self.max_connections:
+                self._cleanup_oldest_connection()
+            
             # Create new connection
             logger.debug(f"Connecting to {account}")
             client = IMAPClient(account.imap_server, port=account.imap_port, ssl=account.ssl)
             client.login(account.email_address, account.password)
             
-            # Store connection
-            self.connections[account.name] = client
+            # Store connection with timestamp
+            self.connections[account.name] = {
+                'client': client,
+                'last_used': time.time()
+            }
             logger.debug(f"Connected to {account}")
             return client
         except Exception as e:
             logger.error(f"Error connecting to {account}: {e}")
             return None
     
+    def _cleanup_oldest_connection(self) -> None:
+        """Remove the oldest connection to make room for new ones."""
+        if not self.connections:
+            return
+            
+        oldest_account = min(
+            self.connections.items(),
+            key=lambda x: x[1]['last_used']
+        )[0]
+        
+        self.disconnect(oldest_account)
+    
     def disconnect(self, account_name: str) -> None:
         """Disconnect from an IMAP server.
         
         Args:
-            account_name: Name of the account to disconnect from
+            account_name: Name of the account to disconnect
         """
-        if account_name in self.connections:
-            try:
-                self.connections[account_name].logout()
+        try:
+            if account_name in self.connections:
+                self.connections[account_name]['client'].logout()
+                del self.connections[account_name]
                 logger.debug(f"Disconnected from {account_name}")
-            except Exception as e:
-                logger.error(f"Error disconnecting from {account_name}: {e}")
-            finally:
+        except Exception as e:
+            logger.error(f"Error disconnecting from {account_name}: {e}")
+            # Ensure connection is removed even if logout fails
+            if account_name in self.connections:
                 del self.connections[account_name]
     
     def disconnect_all(self) -> None:

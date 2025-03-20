@@ -26,6 +26,8 @@ class SQLiteStateManager:
             db_file_path = os.path.join(state_dir, "processed_emails.db")
             
         self.db_file_path = db_file_path
+        self._connection_pool = []
+        self._max_connections = 5
         
         # Create directory for database file if it doesn't exist
         os.makedirs(os.path.dirname(self.db_file_path), exist_ok=True)
@@ -127,6 +129,83 @@ class SQLiteStateManager:
         unique_str = f"{account_name}:{email.msg_id}:{email.from_addr}:{email.subject}:{email.date}"
         return hashlib.md5(unique_str.encode()).hexdigest()
     
+    def _get_connection(self) -> sqlite3.Connection:
+        """Get a database connection from the pool or create a new one.
+        
+        Returns:
+            A SQLite connection
+        """
+        if self._connection_pool:
+            conn = self._connection_pool.pop()
+            if conn is None or not self._is_connection_valid(conn):
+                conn = self._create_connection()
+            return conn
+        return self._create_connection()
+    
+    def _return_connection(self, conn: sqlite3.Connection) -> None:
+        """Return a connection to the pool.
+        
+        Args:
+            conn: The connection to return
+        """
+        if conn is None:
+            return
+            
+        if len(self._connection_pool) < self._max_connections:
+            if self._is_connection_valid(conn):
+                self._connection_pool.append(conn)
+            else:
+                conn.close()
+        else:
+            conn.close()
+    
+    def _create_connection(self) -> sqlite3.Connection:
+        """Create a new database connection.
+        
+        Returns:
+            A new SQLite connection
+        """
+        conn = sqlite3.connect(self.db_file_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+    
+    def _is_connection_valid(self, conn: sqlite3.Connection) -> bool:
+        """Check if a connection is still valid.
+        
+        Args:
+            conn: The connection to check
+            
+        Returns:
+            True if connection is valid, False otherwise
+        """
+        try:
+            conn.execute("SELECT 1")
+            return True
+        except sqlite3.Error:
+            return False
+    
+    def _execute_with_connection(self, operation, *args, **kwargs):
+        """Execute a database operation with connection management.
+        
+        Args:
+            operation: Function to execute with the connection
+            *args: Positional arguments for the operation
+            **kwargs: Keyword arguments for the operation
+            
+        Returns:
+            Result of the operation
+        """
+        conn = self._get_connection()
+        try:
+            result = operation(conn, *args, **kwargs)
+            conn.commit()
+            return result
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            self._return_connection(conn)
+    
     def is_email_processed(self, account_name: str, email: Email) -> bool:
         """Check if an email has been processed.
         
@@ -139,22 +218,15 @@ class SQLiteStateManager:
         """
         email_id = self._generate_email_id(account_name, email)
         
-        try:
-            conn = sqlite3.connect(self.db_file_path)
+        def check_email(conn):
             cursor = conn.cursor()
-            
             cursor.execute(
                 "SELECT COUNT(*) FROM processed_emails WHERE account_name = ? AND email_id = ?",
                 (account_name, email_id)
             )
+            return cursor.fetchone()[0] > 0
             
-            count = cursor.fetchone()[0]
-            conn.close()
-            
-            return count > 0
-        except Exception as e:
-            logger.error(f"Error checking if email is processed: {e}")
-            return False
+        return self._execute_with_connection(check_email)
     
     def mark_email_as_processed(self, account_name: str, email: Email, category: str = None) -> None:
         """Mark an email as processed.
@@ -166,8 +238,7 @@ class SQLiteStateManager:
         """
         email_id = self._generate_email_id(account_name, email)
         
-        try:
-            conn = sqlite3.connect(self.db_file_path)
+        def mark_email(conn):
             cursor = conn.cursor()
             
             # Check if this email is already in the database
@@ -214,17 +285,14 @@ class SQLiteStateManager:
                     )
                 )
             
-            conn.commit()
-            conn.close()
-            
             logger.debug(
                 f"Marked email as processed: {account_name} | "
                 f"From: {email.from_addr[:40] if email.from_addr else 'None'} | "
                 f"Subject: {email.subject[:40] if email.subject else 'None'} | "
                 f"Category: {category or 'None'}"
             )
-        except Exception as e:
-            logger.error(f"Error marking email as processed: {e}")
+        
+        self._execute_with_connection(mark_email)
     
     def cleanup_old_entries(self, max_age_days: int = 30) -> None:
         """Clean up old entries from the processed state.
