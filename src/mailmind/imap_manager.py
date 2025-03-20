@@ -16,8 +16,9 @@ class IMAPManager:
     
     def __init__(self):
         """Initialize the IMAP manager."""
-        self.connections: Dict[str, IMAPClient] = {}
+        self.connections: Dict[str, Dict] = {}
         self.max_connections = 5  # Limit concurrent connections
+        self.connection_timeout = 30  # Seconds to wait before reconnecting
     
     def connect(self, account: EmailAccount) -> Optional[IMAPClient]:
         """Connect to an IMAP server.
@@ -29,10 +30,16 @@ class IMAPManager:
             An IMAPClient object if connection successful, None otherwise
         """
         try:
-            # Check if already connected
-            if account.name in self.connections and self.connections[account.name].is_connected:
-                logger.debug(f"Already connected to {account}")
-                return self.connections[account.name]
+            # Check if already connected and connection is still valid
+            if account.name in self.connections:
+                conn_info = self.connections[account.name]
+                if conn_info['client'].is_connected():
+                    # Update last used timestamp
+                    conn_info['last_used'] = time.time()
+                    return conn_info['client']
+                else:
+                    # Connection exists but is invalid, clean it up
+                    self.disconnect(account.name)
             
             # Clean up old connections if we're at the limit
             if len(self.connections) >= self.max_connections:
@@ -46,12 +53,15 @@ class IMAPManager:
             # Store connection with timestamp
             self.connections[account.name] = {
                 'client': client,
-                'last_used': time.time()
+                'last_used': time.time(),
+                'account': account  # Store account info for reconnection
             }
             logger.debug(f"Connected to {account}")
             return client
         except Exception as e:
             logger.error(f"Error connecting to {account}: {e}")
+            if account.name in self.connections:
+                self.disconnect(account.name)
             return None
     
     def _cleanup_oldest_connection(self) -> None:
@@ -74,7 +84,16 @@ class IMAPManager:
         """
         try:
             if account_name in self.connections:
-                self.connections[account_name]['client'].logout()
+                conn_info = self.connections[account_name]
+                client = conn_info['client']
+                
+                # Only try to logout if the connection is still valid
+                if client.is_connected():
+                    try:
+                        client.logout()
+                    except Exception as e:
+                        logger.warning(f"Error during logout for {account_name}: {e}")
+                
                 del self.connections[account_name]
                 logger.debug(f"Disconnected from {account_name}")
         except Exception as e:
@@ -167,64 +186,64 @@ class IMAPManager:
         
         Args:
             client: The IMAPClient object
-            folder: The folder to fetch emails from
-            max_emails: Maximum number of emails to fetch
+            folder: The folder to get emails from
+            max_emails: Maximum number of emails to get
             
         Returns:
             Dictionary mapping message IDs to Email objects
         """
+        emails = {}
+        
         try:
-            # Select the folder
+            # Select folder
             client.select_folder(folder)
             logger.debug(f"Selected folder: {folder}")
             
-            # Search for all emails in the folder
-            messages = client.search(['ALL'])
-            logger.debug(f"Found {len(messages)} emails in {folder}")
+            # Get all message IDs
+            msg_ids = client.search(['ALL'])
+            if not msg_ids:
+                logger.debug(f"No emails found in {folder}")
+                return emails
             
-            # Sort messages by ID (higher IDs are more recent)
-            messages.sort(reverse=True)
+            # Limit number of emails if specified
+            if max_emails > 0:
+                msg_ids = msg_ids[-max_emails:]
             
-            # Limit the number of emails (most recent first)
-            if max_emails > 0 and len(messages) > max_emails:
-                logger.debug(f"Limiting to {max_emails} most recent emails")
-                messages = messages[:max_emails]
-            
-            # Fetch email data
-            if not messages:
-                logger.debug(f"No messages to fetch from {folder}")
-                return {}
-            
-            logger.debug(f"Fetching {len(messages)} emails from {folder}")
-            # Use BODY.PEEK[] instead of BODY[] to avoid marking emails as read
-            raw_emails = client.fetch(messages, ['ENVELOPE', 'BODY.PEEK[]'])
-            
-            # Convert to Email objects
-            emails = {}
-            for msg_id, data in raw_emails.items():
-                try:
-                    # Check if the key exists in the data
-                    if b'BODY.PEEK[]' not in data:
-                        # Try alternative keys that might be returned by the server
-                        body_key = None
-                        for key in data.keys():
-                            if isinstance(key, bytes) and b'BODY' in key:
-                                body_key = key
-                                break
+            # Fetch emails in batches to avoid memory issues
+            batch_size = 50
+            for i in range(0, len(msg_ids), batch_size):
+                batch_ids = msg_ids[i:i+batch_size]
+                
+                # Fetch email data
+                raw_emails = client.fetch(batch_ids, ['BODY.PEEK[]'])
+                
+                for msg_id, data in raw_emails.items():
+                    try:
+                        # Check if the key exists in the data
+                        if b'BODY.PEEK[]' not in data:
+                            # Try alternative keys that might be returned by the server
+                            body_key = None
+                            for key in data.keys():
+                                if isinstance(key, bytes) and b'BODY' in key:
+                                    body_key = key
+                                    break
+                            
+                            if body_key is None:
+                                logger.error(f"No body data found for email {msg_id}. Available keys: {list(data.keys())}")
+                                continue
+                            
+                            message = email.message_from_bytes(data[body_key])
+                        else:
+                            # The key is present as expected
+                            message = email.message_from_bytes(data[b'BODY.PEEK[]'])
                         
-                        if body_key is None:
-                            logger.error(f"No body data found for email {msg_id}. Available keys: {list(data.keys())}")
-                            continue
-                        
-                        message = email.message_from_bytes(data[body_key])
-                    else:
-                        # The key is present as expected
-                        message = email.message_from_bytes(data[b'BODY.PEEK[]'])
-                    
-                    emails[msg_id] = Email.from_message(message, msg_id)
-                    emails[msg_id].folder = folder
-                except Exception as e:
-                    logger.error(f"Error processing email {msg_id}: {e}")
+                        emails[msg_id] = Email.from_message(message, msg_id)
+                        emails[msg_id].folder = folder
+                    except Exception as e:
+                        logger.error(f"Error processing email {msg_id}: {e}")
+                
+                # Clear batch data from memory
+                del raw_emails
             
             logger.debug(f"Successfully processed {len(emails)} emails from {folder} without marking as read")
             return emails
