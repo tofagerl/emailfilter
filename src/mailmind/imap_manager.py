@@ -19,6 +19,7 @@ class IMAPManager:
         self.connections: Dict[str, Dict] = {}
         self.max_connections = 5  # Limit concurrent connections
         self.connection_timeout = 30  # Seconds to wait before reconnecting
+        self._current_folders = {}  # Track currently selected folders
     
     def connect(self, account: EmailAccount) -> Optional[IMAPClient]:
         """Connect to an IMAP server.
@@ -56,6 +57,7 @@ class IMAPManager:
                 'last_used': time.time(),
                 'account': account  # Store account info for reconnection
             }
+            self._current_folders[account.name] = None
             logger.debug(f"Connected to {account}")
             return client
         except Exception as e:
@@ -95,17 +97,133 @@ class IMAPManager:
                         logger.warning(f"Error during logout for {account_name}: {e}")
                 
                 del self.connections[account_name]
+                if account_name in self._current_folders:
+                    del self._current_folders[account_name]
                 logger.debug(f"Disconnected from {account_name}")
         except Exception as e:
             logger.error(f"Error disconnecting from {account_name}: {e}")
             # Ensure connection is removed even if logout fails
             if account_name in self.connections:
                 del self.connections[account_name]
+            if account_name in self._current_folders:
+                del self._current_folders[account_name]
     
     def disconnect_all(self) -> None:
         """Disconnect from all IMAP servers."""
         for account_name in list(self.connections.keys()):
             self.disconnect(account_name)
+    
+    def _select_folder_if_needed(self, client: IMAPClient, account_name: str, folder: str) -> bool:
+        """Select a folder only if it's not already selected.
+        
+        Args:
+            client: IMAP client
+            account_name: Account name
+            folder: Folder to select
+            
+        Returns:
+            True if folder was selected successfully, False otherwise
+        """
+        try:
+            current_folder = self._current_folders.get(account_name)
+            if current_folder != folder:
+                client.select_folder(folder)
+                self._current_folders[account_name] = folder
+                logger.debug(f"Selected folder: {folder}")
+                # Clear response buffer after folder selection
+                client._imap._get_response()
+            return True
+        except Exception as e:
+            logger.error(f"Error selecting folder {folder}: {e}")
+            return False
+    
+    def get_emails(
+        self, client: IMAPClient, folder: str, max_emails: int
+    ) -> Dict[int, Email]:
+        """Get all emails from a folder without marking them as read.
+        
+        Args:
+            client: IMAP client
+            folder: The folder to get emails from
+            max_emails: Maximum number of emails to get
+            
+        Returns:
+            Dictionary mapping message IDs to Email objects
+        """
+        emails = {}
+        
+        try:
+            # Get account name from client
+            account_name = next(
+                (name for name, info in self.connections.items() if info['client'] == client),
+                None
+            )
+            if not account_name:
+                logger.error("Could not find account for client")
+                return emails
+            
+            # Select folder if needed
+            if not self._select_folder_if_needed(client, account_name, folder):
+                return emails
+            
+            # Get all message IDs
+            msg_ids = client.search(['ALL'])
+            if not msg_ids:
+                logger.debug(f"No emails found in {folder}")
+                return emails
+            
+            # Limit number of emails if specified
+            if max_emails > 0:
+                msg_ids = msg_ids[-max_emails:]
+            
+            # Fetch emails in batches to avoid memory issues
+            batch_size = 50
+            for i in range(0, len(msg_ids), batch_size):
+                batch_ids = msg_ids[i:i+batch_size]
+                
+                try:
+                    # Fetch email data
+                    raw_emails = client.fetch(batch_ids, ['BODY.PEEK[]'])
+                    
+                    for msg_id, data in raw_emails.items():
+                        try:
+                            # Check if the key exists in the data
+                            if b'BODY.PEEK[]' not in data:
+                                # Try alternative keys that might be returned by the server
+                                body_key = None
+                                for key in data.keys():
+                                    if isinstance(key, bytes) and b'BODY' in key:
+                                        body_key = key
+                                        break
+                                
+                                if body_key is None:
+                                    logger.error(f"No body data found for email {msg_id}. Available keys: {list(data.keys())}")
+                                    continue
+                                
+                                message = email.message_from_bytes(data[body_key])
+                            else:
+                                # The key is present as expected
+                                message = email.message_from_bytes(data[b'BODY.PEEK[]'])
+                            
+                            emails[msg_id] = Email.from_message(message, msg_id)
+                            emails[msg_id].folder = folder
+                        except Exception as e:
+                            logger.error(f"Error processing email {msg_id}: {e}")
+                    
+                    # Clear batch data from memory
+                    del raw_emails
+                    # Clear response buffer
+                    client._imap._get_response()
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching batch: {e}")
+                    continue
+            
+            logger.debug(f"Successfully processed {len(emails)} emails from {folder} without marking as read")
+            return emails
+        except Exception as e:
+            logger.error(f"Error fetching emails from {folder}: {e}")
+            return {}
     
     def ensure_folder_exists(self, client: IMAPClient, folder: str) -> None:
         """Ensure a folder exists, create it if it doesn't.
@@ -177,76 +295,4 @@ class IMAPManager:
             return True
         except Exception as e:
             logger.error(f"Error moving email {msg_id} to {target_folder}: {e}")
-            return False
-    
-    def get_emails(
-        self, client: IMAPClient, folder: str, max_emails: int
-    ) -> Dict[int, Email]:
-        """Get all emails from a folder without marking them as read.
-        
-        Args:
-            client: The IMAPClient object
-            folder: The folder to get emails from
-            max_emails: Maximum number of emails to get
-            
-        Returns:
-            Dictionary mapping message IDs to Email objects
-        """
-        emails = {}
-        
-        try:
-            # Select folder
-            client.select_folder(folder)
-            logger.debug(f"Selected folder: {folder}")
-            
-            # Get all message IDs
-            msg_ids = client.search(['ALL'])
-            if not msg_ids:
-                logger.debug(f"No emails found in {folder}")
-                return emails
-            
-            # Limit number of emails if specified
-            if max_emails > 0:
-                msg_ids = msg_ids[-max_emails:]
-            
-            # Fetch emails in batches to avoid memory issues
-            batch_size = 50
-            for i in range(0, len(msg_ids), batch_size):
-                batch_ids = msg_ids[i:i+batch_size]
-                
-                # Fetch email data
-                raw_emails = client.fetch(batch_ids, ['BODY.PEEK[]'])
-                
-                for msg_id, data in raw_emails.items():
-                    try:
-                        # Check if the key exists in the data
-                        if b'BODY.PEEK[]' not in data:
-                            # Try alternative keys that might be returned by the server
-                            body_key = None
-                            for key in data.keys():
-                                if isinstance(key, bytes) and b'BODY' in key:
-                                    body_key = key
-                                    break
-                            
-                            if body_key is None:
-                                logger.error(f"No body data found for email {msg_id}. Available keys: {list(data.keys())}")
-                                continue
-                            
-                            message = email.message_from_bytes(data[body_key])
-                        else:
-                            # The key is present as expected
-                            message = email.message_from_bytes(data[b'BODY.PEEK[]'])
-                        
-                        emails[msg_id] = Email.from_message(message, msg_id)
-                        emails[msg_id].folder = folder
-                    except Exception as e:
-                        logger.error(f"Error processing email {msg_id}: {e}")
-                
-                # Clear batch data from memory
-                del raw_emails
-            
-            logger.debug(f"Successfully processed {len(emails)} emails from {folder} without marking as read")
-            return emails
-        except Exception as e:
-            logger.error(f"Error fetching emails from {folder}: {e}")
-            return {} 
+            return False 
