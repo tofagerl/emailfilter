@@ -15,19 +15,19 @@ RUN apk add --no-cache \
     musl-dev \
     python3-dev
 
-# Copy project files
+# Copy only dependency files first
 COPY pyproject.toml README.md ./
-COPY src ./src/
 
-# Install build dependencies explicitly
+# Install build dependencies and build wheels for dependencies
 RUN pip install --upgrade pip && \
-    pip install wheel hatchling editables
+    pip install wheel hatchling editables && \
+    pip wheel --no-cache-dir --wheel-dir /app/wheels hatchling editables openai pyyaml
+
+# Now copy the source code
+COPY src ./src/
 
 # Build the package as a wheel
 RUN pip wheel --no-cache-dir --wheel-dir /app/wheels .
-
-# Also build wheels for dependencies
-RUN pip wheel --no-cache-dir --wheel-dir /app/wheels hatchling editables openai pyyaml
 
 # Final stage
 FROM python:3.10-alpine
@@ -38,7 +38,9 @@ WORKDIR /app
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=UTC
+    TZ=UTC \
+    MAILMIND_LOGS_DIR=/home/mailmind/logs \
+    MAILMIND_STATE_DIR=/home/mailmind/.mailmind
 
 # Create non-root user and required directories
 RUN addgroup -S mailmind && \
@@ -46,28 +48,25 @@ RUN addgroup -S mailmind && \
     mkdir -p /config /home/mailmind/logs /home/mailmind/.mailmind && \
     chown -R mailmind:mailmind /config /home/mailmind
 
-# Copy wheels and project files from builder stage
+# Copy wheels from builder stage
 COPY --from=builder /app/wheels /wheels
-COPY src ./src/
 
-# Install the package from wheels
+# Install dependencies first
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --no-index --find-links=/wheels mailmind && \
+    pip install --no-cache-dir --no-index --find-links=/wheels \
+    hatchling editables openai pyyaml
+
+# Copy and install the app last
+COPY src ./src/
+RUN pip install --no-cache-dir --no-index --find-links=/wheels mailmind && \
     rm -rf /wheels
 
-# Set volume for configuration
-VOLUME /config
-# Set volume for persistent data including SQLite database
-VOLUME /home/mailmind
+# Set volumes
+VOLUME ["/config", "/home/mailmind"]
 
 # Add metadata
 LABEL version="1.0.0" \
     description="Email filtering and categorization tool"
-
-# Set environment variable for logs directory
-ENV MAILMIND_LOGS_DIR=/home/mailmind/logs
-# Set environment variable for state directory
-ENV MAILMIND_STATE_DIR=/home/mailmind/.mailmind
 
 # Add a healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -76,8 +75,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Switch to non-root user
 USER mailmind
 
-# Set entrypoint
+# Set entrypoint and default command
 ENTRYPOINT ["mailmind"]
-
-# Default command (can be overridden)
 CMD ["imap", "--config", "/config/config.yaml", "--daemon"] 
