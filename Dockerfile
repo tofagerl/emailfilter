@@ -77,4 +77,4 @@ USER mailmind
 
 # Set entrypoint and default command
 ENTRYPOINT ["mailmind"]
-CMD ["imap", "--config", "/config/config.yaml", "--daemon"] 
+CMD ["--config", "/config/config.yaml", "--daemon"] 
