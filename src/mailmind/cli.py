@@ -77,7 +77,7 @@ def main():
         
         # Start processing
         if daemon_mode:
-            email_processor.start_continuous_processing()
+            email_processor.start_monitoring()
         else:
             email_processor.process_all_accounts()
             
