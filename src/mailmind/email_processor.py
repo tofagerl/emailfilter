@@ -15,7 +15,6 @@ from .models import Email, EmailAccount, ProcessingOptions
 from .config_manager import ConfigManager
 from .sqlite_state_manager import SQLiteStateManager
 from .imap_manager import IMAPManager
-from .pre_training import PreTrainingManager
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +55,18 @@ def filter_emails(
 class EmailProcessor:
     """Processes emails from IMAP accounts."""
     
-    def __init__(self, config_path: str):
+    def __init__(self, config_manager: ConfigManager, imap_manager: IMAPManager = None, state_manager: SQLiteStateManager = None):
         """Initialize the email processor.
         
         Args:
-            config_path: Path to the YAML configuration file
+            config_manager: The configuration manager instance
+            imap_manager: Optional IMAP manager instance. If None, creates a new one.
+            state_manager: Optional state manager instance. If None, creates a new one.
         """
-        # Initialize components
-        self.config_manager = ConfigManager(config_path)
-        
-        # Set up state manager - use SQLite with default path
-        self.state_manager = SQLiteStateManager()
-        
-        # Set up IMAP manager
-        self.imap_manager = IMAPManager()
+        # Set components
+        self.config_manager = config_manager
+        self.imap_manager = imap_manager or IMAPManager()
+        self.state_manager = state_manager or SQLiteStateManager()
         
         # Memory management settings
         self.max_email_size = 50 * 1024 * 1024  # 50MB max email size
@@ -93,7 +90,7 @@ class EmailProcessor:
             Estimated size in bytes
         """
         size = 0
-        size += len(str(email.msg_id))
+        size += len(str(email.message_id))
         size += len(str(email.from_addr or ''))
         size += len(str(email.to_addr or ''))
         size += len(str(email.subject or ''))
@@ -113,7 +110,7 @@ class EmailProcessor:
         """
         size = self._estimate_email_size(email)
         if size > self.max_email_size:
-            logger.warning(f"Email {email.msg_id} exceeds size limit of {self.max_email_size/1024/1024}MB")
+            logger.warning(f"Email {email.message_id} exceeds size limit of {self.max_email_size/1024/1024}MB")
             return False
         return True
     
@@ -538,6 +535,8 @@ def main(config_path: str, daemon_mode: bool = False) -> None:
         config_path: Path to the configuration file
         daemon_mode: Whether to run in continuous monitoring mode
     """
+    from .pre_training import PreTrainingManager  # Import moved here to avoid circular import
+    
     try:
         processor = EmailProcessor(config_path)
         

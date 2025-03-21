@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from .models import Email, Category
 from .sqlite_state_manager import SQLiteStateManager
 from .email_processor import EmailProcessor
-from .categorizer import Categorizer
+from .categorizer import EmailCategorizer
 from .imap_manager import IMAPManager
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class PreTrainingManager:
         self,
         state_manager: SQLiteStateManager,
         email_processor: EmailProcessor,
-        categorizer: Categorizer,
+        categorizer: EmailCategorizer,
         imap_manager: IMAPManager
     ):
         self.state_manager = state_manager
@@ -60,50 +60,41 @@ class PreTrainingManager:
         Args:
             lookback_days: Number of days to look back for email changes
         """
-        # Get all category folders from IMAP
-        categories = self.state_manager.get_all_categories()
-        since_date = datetime.now() - timedelta(days=lookback_days)
+        # Get account from config
+        account = self.email_processor.config_manager.accounts[0]
         
-        for category in categories:
-            # Get emails from this category's folder
-            folder_emails = self.imap_manager.fetch_emails_from_folder(
-                category.folder_name,
-                since=since_date
-            )
+        # Connect to IMAP server
+        client = self.imap_manager.connect(account)
+        if not client:
+            logger.error(f"Failed to connect to {account}")
+            return
+        
+        try:
+            # Get all category folders from config
+            categories = account.categories
+            since_date = datetime.now() - timedelta(days=lookback_days)
             
-            for msg_id, email_data in folder_emails.items():
-                # Check if this email exists in our database
-                existing_email = self.state_manager.get_email_by_message_id(msg_id)
+            for category in categories:
+                # Get emails from this category's folder
+                folder_emails = self.imap_manager.get_emails(
+                    client,
+                    category.foldername,
+                    max_emails=0  # No limit
+                )
                 
-                if existing_email:
-                    # Email exists - check if category changed
-                    if existing_email.category_id != category.id:
-                        logger.info(
-                            f"Category change detected for email {msg_id}: "
-                            f"from {existing_email.category.name if existing_email.category else 'None'} "
-                            f"to {category.name}"
+                for msg_id, email_obj in folder_emails.items():
+                    # Check if this email exists in our database
+                    if not self.state_manager.is_email_processed(account.name, email_obj):
+                        # Email doesn't exist - add it to database
+                        logger.info(f"New email {msg_id} found in category {category.name}")
+                        self.state_manager.mark_email_as_processed(
+                            account.name,
+                            email_obj,
+                            category.name
                         )
-                        # Update category in database
-                        self.state_manager.update_email_category(
-                            existing_email.id,
-                            category.id
-                        )
-                else:
-                    # Email doesn't exist - add it to database
-                    logger.info(f"New email {msg_id} found in category {category.name}")
-                    processed_content = self.email_processor.process_email_content(
-                        email_data.get('body', '')
-                    )
-                    
-                    self.state_manager.add_email(
-                        message_id=msg_id,
-                        subject=email_data.get('subject', ''),
-                        sender=email_data.get('from', ''),
-                        content=email_data.get('body', ''),
-                        processed_content=processed_content,
-                        category_id=category.id,
-                        received_date=email_data.get('date')
-                    )
+        finally:
+            # Disconnect from IMAP server
+            self.imap_manager.disconnect(account.name)
         
     def prepare_training_data(
         self,
@@ -123,6 +114,37 @@ class PreTrainingManager:
         Returns:
             Tuple of (training_data, test_data) as pandas DataFrames
         """
+        # Get account from config
+        account = self.email_processor.config_manager.accounts[0]
+        
+        # Connect to IMAP server
+        if not self.imap_manager.connect(account):
+            logger.error(f"Failed to connect to {account}")
+            return pd.DataFrame(), pd.DataFrame()
+        
+        try:
+            # Get all category folders from config
+            categories = account.categories
+            
+            # Process emails from each category folder
+            for category in categories:
+                # Get emails from this category's folder
+                folder_emails = self.imap_manager.fetch_emails_from_folder(category.foldername)
+                
+                for email_obj in folder_emails:
+                    # Check if this email exists in our database
+                    if not self.state_manager.is_email_processed(account.name, email_obj):
+                        # Email doesn't exist - add it to database
+                        logger.info(f"New email {email_obj.message_id} found in category {category.name}")
+                        self.state_manager.mark_email_as_processed(
+                            account.name,
+                            email_obj,
+                            category.name
+                        )
+        finally:
+            # Disconnect from IMAP server
+            self.imap_manager.disconnect(account.name)
+        
         # Get all processed emails with their categories
         emails = self.state_manager.get_all_emails_with_categories()
         
@@ -133,10 +155,9 @@ class PreTrainingManager:
         # Convert to DataFrame for easier processing
         data = []
         for email in emails:
-            processed_content = self.email_processor.process_email_content(email.content)
             data.append({
-                'email_id': email.id,
-                'content': processed_content,
+                'message_id': email.message_id,
+                'content': email.body,
                 'category': email.category.name if email.category else 'uncategorized'
             })
             

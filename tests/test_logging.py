@@ -6,10 +6,10 @@ import json
 import logging
 from dotenv import load_dotenv
 
-from emailfilter.categorizer import (
+from mailmind.categorizer import (
     initialize_openai_client, batch_categorize_emails_for_account
 )
-from emailfilter.models import EmailAccount, Category
+from mailmind.models import EmailAccount, Category
 
 # Configure logging
 logging.basicConfig(

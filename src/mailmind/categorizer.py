@@ -505,45 +505,46 @@ def initialize_openai_client(api_key=None, config_path=None):
 
 
 def batch_categorize_emails_for_account(emails, account, batch_size=10, model="gpt-4o-mini"):
-    """Categorize emails for an account (backward compatibility).
+    """Categorize a batch of emails for an account.
     
-    This function uses the global categorizer instance for backward compatibility.
-    New code should use the EmailCategorizer class directly.
+    Args:
+        emails: List of Email objects
+        account: The email account with category definitions
+        batch_size: Maximum number of emails to process in one batch
+        model: The OpenAI model to use
+        
+    Returns:
+        List of dictionaries with category information
     """
-    global _global_categorizer
-    
-    # Create categorizer if it doesn't exist
-    if not _global_categorizer:
-        _global_categorizer = EmailCategorizer()
-    
-    # Override batch size and model for this call
-    original_config = _global_categorizer.config
-    _global_categorizer.config = CategorizerConfig(
-        model=model,
-        batch_size=batch_size,
-        temperature=original_config.temperature,
-        max_tokens=original_config.max_tokens,
-        top_p=original_config.top_p,
-        frequency_penalty=original_config.frequency_penalty,
-        presence_penalty=original_config.presence_penalty
-    )
-    
-    # Convert account categories to Category objects
-    categories = []
-    for cat in account.categories:
-        categories.append(Category(
-            name=cat.name,
-            description=cat.description,
-            folder_name=getattr(cat, "foldername", cat.name)
-        ))
-    
-    # Categorize emails
-    results = _global_categorizer.categorize_emails(emails, categories)
-    
-    # Restore original config
-    _global_categorizer.config = original_config
-    
-    return results
+    try:
+        # Convert Email objects to dictionaries
+        email_dicts = []
+        for email in emails:
+            email_dicts.append({
+                'from': email.from_addr,
+                'to': email.to_addr,
+                'subject': email.subject,
+                'date': email.date,
+                'body': email.body
+            })
+        
+        # Create categorizer config
+        config = CategorizerConfig(model=model, batch_size=batch_size)
+        
+        # Create categorizer instance
+        categorizer = EmailCategorizer(config=config)
+        
+        # Get categories from account
+        categories = [Category(c.name, c.description, c.foldername) for c in account.categories]
+        
+        # Categorize emails
+        results = categorizer.categorize_emails(email_dicts, categories)
+        
+        return results
+    except Exception as e:
+        logger.error(f"Unexpected error during categorization: {e}")
+        # Return default categories for all emails
+        return [{"category": "INBOX"} for _ in range(len(emails))]
 
 
 # Initialize global categorizer for backward compatibility

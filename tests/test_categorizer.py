@@ -31,7 +31,7 @@ def mock_account():
     """Create a mock account for testing."""
     return EmailAccount(
         name="Test Account",
-        email_address="test@example.com",
+        email="test@example.com",
         password="password",
         imap_server="imap.example.com",
         categories=[

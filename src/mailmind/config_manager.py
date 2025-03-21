@@ -2,6 +2,7 @@
 
 import yaml
 import logging
+import os
 from typing import Dict, List, Optional
 
 from .models import EmailAccount, ProcessingOptions, Category
@@ -42,13 +43,13 @@ class ConfigManager:
                         category = Category(
                             name=cat_config.get("name", "").upper(),
                             description=cat_config.get("description", ""),
-                            foldername=cat_config.get("foldername", "INBOX")
+                            foldername=cat_config.get("folder", "INBOX")
                         )
                         categories.append(category)
                 
                 account = EmailAccount(
                     name=account_config.get("name", ""),
-                    email_address=account_config.get("email", ""),
+                    email=account_config.get("email", ""),
                     password=account_config.get("password", ""),
                     imap_server=account_config.get("imap_server", ""),
                     imap_port=account_config.get("imap_port", 993),
@@ -58,26 +59,28 @@ class ConfigManager:
                 )
                 self.accounts.append(account)
             
-            # Load options
-            options_config = config.get("options", {})
-            
-            self.options = ProcessingOptions(
-                max_emails_per_run=options_config.get("max_emails_per_run", 100),
-                batch_size=options_config.get("batch_size", 10),
-                idle_timeout=options_config.get("idle_timeout", 1740),
-                move_emails=options_config.get("move_emails", True),
-                model=options_config.get("model", "gpt-4o-mini")
-            )
-            
             # Load OpenAI API key
             self.openai_api_key = config.get("openai_api_key")
             if not self.openai_api_key:
-                raise ValueError("OpenAI API key not found in config file")
+                # Try environment variable
+                self.openai_api_key = os.environ.get("OPENAI_API_KEY")
+                if not self.openai_api_key:
+                    raise ValueError("OpenAI API key not found in config or environment")
             
-            logger.debug(f"Loaded configuration with {len(self.accounts)} accounts")
-        except FileNotFoundError:
-            logger.error(f"Config file not found: {self.config_path}")
-            raise ValueError(f"Config file not found: {self.config_path}")
+            # Load OpenAI settings
+            openai_config = config.get("openai", {})
+            self.openai_model = openai_config.get("model", "gpt-4")
+            self.openai_temperature = openai_config.get("temperature", 0.7)
+            self.openai_max_tokens = openai_config.get("max_tokens", 1000)
+            
+            # Load processing options
+            processing_config = config.get("processing", {})
+            self.batch_size = processing_config.get("batch_size", 10)
+            self.lookback_days = processing_config.get("lookback_days", 30)
+            self.min_samples_per_category = processing_config.get("min_samples_per_category", 5)
+            self.test_size = processing_config.get("test_size", 0.2)
+            
+            logger.debug("Configuration loaded successfully")
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
             raise
@@ -88,7 +91,7 @@ class ConfigManager:
             raise ValueError("No email accounts configured")
         
         for account in self.accounts:
-            if not account.name or not account.email_address or not account.password or not account.imap_server:
+            if not account.name or not account.email or not account.password or not account.imap_server:
                 raise ValueError(f"Invalid account configuration for {account}")
             
             # Validate categories

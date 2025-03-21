@@ -1,6 +1,6 @@
 """Tests for the filter module."""
 
-from mailmind import filter
+from mailmind.email_processor import filter_emails
 
 
 def test_filter_emails():
@@ -13,20 +13,20 @@ def test_filter_emails():
     ]
     
     # Test with no filters
-    assert filter.filter_emails(emails) == emails
+    assert filter_emails(emails) == emails
     
     # Test with from filter
-    filtered = filter.filter_emails(emails, {"from": "example.com"})
+    filtered = filter_emails(emails, {"from": "example.com"})
     assert len(filtered) == 2
     assert all("example.com" in email["from"] for email in filtered)
     
     # Test with subject filter
-    filtered = filter.filter_emails(emails, {"subject": "Meeting"})
+    filtered = filter_emails(emails, {"subject": "Meeting"})
     assert len(filtered) == 1
     assert filtered[0]["subject"] == "Meeting"
     
     # Test with multiple filters
-    filtered = filter.filter_emails(emails, {"from": "example.com", "subject": "Update"})
+    filtered = filter_emails(emails, {"from": "example.com", "subject": "Update"})
     assert len(filtered) == 1
     assert filtered[0]["from"] == "user@example.com"
     assert filtered[0]["subject"] == "Update" 

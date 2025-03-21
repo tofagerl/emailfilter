@@ -4,14 +4,23 @@ import sys
 import logging
 import os
 from mailmind.email_processor import main as email_processor_main
+from mailmind.config_manager import ConfigManager
+from mailmind.imap_manager import IMAPManager
+from mailmind.sqlite_state_manager import SQLiteStateManager
+from mailmind.email_processor import EmailProcessor
 
 # Version information
 __version__ = "1.0.0"
 
-def setup_logging():
-    """Set up logging configuration."""
+def setup_logging(log_dir: str = None):
+    """Set up logging configuration.
+    
+    Args:
+        log_dir: Optional path to log directory. If None, defaults to ~/.mailmind/logs
+    """
     # Create logs directory if it doesn't exist
-    log_dir = "/home/mailmind/logs"
+    if log_dir is None:
+        log_dir = os.path.expanduser("~/.mailmind/logs")
     os.makedirs(log_dir, exist_ok=True)
     
     # Set up file handler
@@ -43,6 +52,7 @@ def main():
 
     config_path = "/config/config.yaml"  # default
     daemon_mode = False
+    log_dir = None
 
     # Simple arg parsing
     for i, arg in enumerate(sys.argv[1:], 1):
@@ -50,14 +60,29 @@ def main():
             config_path = sys.argv[i + 1]
         elif arg == '--daemon':
             daemon_mode = True
+        elif arg == '--log-dir' and i < len(sys.argv):
+            log_dir = sys.argv[i + 1]
 
     # Set up logging
-    setup_logging()
+    setup_logging(log_dir)
 
     try:
-        email_processor_main(config_path, daemon_mode=daemon_mode)
+        # Initialize components
+        config_manager = ConfigManager(config_path)
+        imap_manager = IMAPManager()
+        state_manager = SQLiteStateManager()
+        
+        # Initialize email processor
+        email_processor = EmailProcessor(config_manager, imap_manager, state_manager)
+        
+        # Start processing
+        if daemon_mode:
+            email_processor.start_continuous_processing()
+        else:
+            email_processor.process_all_accounts()
+            
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"Error during execution: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

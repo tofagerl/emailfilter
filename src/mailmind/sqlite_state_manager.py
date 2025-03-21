@@ -4,10 +4,10 @@ import os
 import hashlib
 import logging
 import sqlite3
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 
-from .models import Email
+from .models import Email, Category
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ class SQLiteStateManager:
         
         Args:
             db_file_path: Path to the SQLite database file. If None, uses the default path.
+                         Use ':memory:' for an in-memory database.
         """
         if db_file_path is None:
             # Use environment variable if set, otherwise use default path
@@ -28,9 +29,15 @@ class SQLiteStateManager:
         self.db_file_path = db_file_path
         self._connection_pool = []
         self._max_connections = 5
+        self._persistent_connection = None
         
-        # Create directory for database file if it doesn't exist
-        os.makedirs(os.path.dirname(self.db_file_path), exist_ok=True)
+        # Only create directory if not using in-memory database
+        if self.db_file_path != ':memory:':
+            os.makedirs(os.path.dirname(self.db_file_path), exist_ok=True)
+        else:
+            # For in-memory database, create a persistent connection
+            self._persistent_connection = sqlite3.connect(self.db_file_path)
+            self._persistent_connection.row_factory = sqlite3.Row
         
         # Initialize database
         self._init_db()
@@ -40,7 +47,10 @@ class SQLiteStateManager:
     def _init_db(self) -> None:
         """Initialize the SQLite database and handle migrations."""
         try:
-            conn = sqlite3.connect(self.db_file_path)
+            if self.db_file_path == ':memory:':
+                conn = self._persistent_connection
+            else:
+                conn = sqlite3.connect(self.db_file_path)
             cursor = conn.cursor()
             
             # Create table for processed emails if it doesn't exist
@@ -48,77 +58,63 @@ class SQLiteStateManager:
             CREATE TABLE IF NOT EXISTS processed_emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_name TEXT NOT NULL,
-                email_id TEXT NOT NULL,
+                hash_id TEXT NOT NULL,
+                message_id TEXT,
+                from_addr TEXT,
+                to_addr TEXT,
+                subject TEXT,
+                body TEXT,
+                date TEXT,
+                folder TEXT,
+                category TEXT,
                 processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(account_name, email_id)
+                UNIQUE(account_name, hash_id)
             )
             ''')
             
-            # Check if the new columns exist, and add them if they don't
-            # This handles migration from older versions of the database
-            cursor.execute("PRAGMA table_info(processed_emails)")
-            columns = [column[1] for column in cursor.fetchall()]
-            
-            # Add new columns if they don't exist
-            if 'from_addr' not in columns:
-                cursor.execute("ALTER TABLE processed_emails ADD COLUMN from_addr TEXT")
-                conn.commit()
-                logger.debug("Adding 'from_addr' column to database")
-            
-            if 'to_addr' not in columns:
-                cursor.execute("ALTER TABLE processed_emails ADD COLUMN to_addr TEXT")
-                conn.commit()
-                logger.debug("Adding 'to_addr' column to database")
-            
-            if 'subject' not in columns:
-                cursor.execute("ALTER TABLE processed_emails ADD COLUMN subject TEXT")
-                conn.commit()
-                logger.debug("Adding 'subject' column to database")
-            
-            if 'date' not in columns:
-                cursor.execute("ALTER TABLE processed_emails ADD COLUMN date TEXT")
-                conn.commit()
-                logger.debug("Adding 'date' column to database")
-            
-            if 'category' not in columns:
-                cursor.execute("ALTER TABLE processed_emails ADD COLUMN category TEXT")
-                conn.commit()
-                logger.debug("Adding 'category' column to database")
-
-            if 'raw_message' not in columns:
-                cursor.execute("ALTER TABLE processed_emails ADD COLUMN raw_message BLOB")
-                conn.commit()
-                logger.debug("Adding 'raw_message' column to database")
-            
-            # Create index for faster lookups
+            # Create table for categories if it doesn't exist
             cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_account_email 
-            ON processed_emails(account_name, email_id)
-            ''')
-            
-            # Create index for sender searches
-            cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_from_addr
-            ON processed_emails(from_addr)
-            ''')
-            
-            # Create index for recipient searches
-            cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_to_addr
-            ON processed_emails(to_addr)
-            ''')
-            
-            # Create index for subject searches
-            cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_subject
-            ON processed_emails(subject)
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                foldername TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(name, foldername)
+            )
             ''')
             
             conn.commit()
-            conn.close()
-            logger.debug(f"SQLite database initialized at {self.db_file_path}")
+            if self.db_file_path != ':memory:':
+                conn.close()
+            
         except Exception as e:
-            logger.error(f"Error initializing SQLite database: {e}")
+            logger.error(f"Error initializing database: {e}")
+            raise
+    
+    def add_category(self, name: str, folder_name: str) -> None:
+        """Add a new category to the database.
+        
+        Args:
+            name: The name of the category
+            folder_name: The IMAP folder name for this category
+        """
+        try:
+            conn = sqlite3.connect(self.db_file_path)
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                "INSERT INTO categories (name, folder_name) VALUES (?, ?)",
+                (name, folder_name)
+            )
+            
+            conn.commit()
+            conn.close()
+            
+            logger.debug(f"Added category {name} with folder {folder_name}")
+            
+        except Exception as e:
+            logger.error(f"Error adding category: {e}")
             raise
     
     def _generate_email_id(self, account_name: str, email: Email) -> str:
@@ -129,10 +125,15 @@ class SQLiteStateManager:
             email: The email object
             
         Returns:
-            A unique string ID for the email
+            A unique hash ID for the email
         """
-        unique_str = f"{account_name}:{email.msg_id}:{email.from_addr}:{email.subject}:{email.date}"
-        return hashlib.md5(unique_str.encode()).hexdigest()
+        # Create a unique string combining account name and email details
+        unique_str = f"{account_name}:{email.from_addr}:{email.subject}:{email.date}"
+        
+        # Generate a hash of the unique string
+        hash_id = hashlib.sha256(unique_str.encode()).hexdigest()
+        
+        return hash_id
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get a database connection from the pool or create a new one.
@@ -140,6 +141,9 @@ class SQLiteStateManager:
         Returns:
             A SQLite connection
         """
+        if self.db_file_path == ':memory:':
+            return self._persistent_connection
+            
         if self._connection_pool:
             conn = self._connection_pool.pop()
             if conn is None or not self._is_connection_valid(conn):
@@ -153,6 +157,9 @@ class SQLiteStateManager:
         Args:
             conn: The connection to return
         """
+        if self.db_file_path == ':memory:':
+            return
+            
         if conn is None:
             return
             
@@ -221,13 +228,13 @@ class SQLiteStateManager:
         Returns:
             True if the email has been processed, False otherwise
         """
-        email_id = self._generate_email_id(account_name, email)
+        hash_id = self._generate_email_id(account_name, email)
         
         def check_email(conn):
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT COUNT(*) FROM processed_emails WHERE account_name = ? AND email_id = ?",
-                (account_name, email_id)
+                "SELECT COUNT(*) FROM processed_emails WHERE account_name = ? AND hash_id = ?",
+                (account_name, hash_id)
             )
             return cursor.fetchone()[0] > 0
             
@@ -241,63 +248,44 @@ class SQLiteStateManager:
             email: The email object
             category: The category assigned to the email (optional)
         """
-        email_id = self._generate_email_id(account_name, email)
+        hash_id = self._generate_email_id(account_name, email)
         
         def mark_email(conn):
             cursor = conn.cursor()
             
             # Check if this email is already in the database
             cursor.execute(
-                "SELECT id FROM processed_emails WHERE account_name = ? AND email_id = ?",
-                (account_name, email_id)
+                "SELECT id FROM processed_emails WHERE account_name = ? AND hash_id = ?",
+                (account_name, hash_id)
             )
-            existing = cursor.fetchone()
+            result = cursor.fetchone()
             
-            if existing:
-                # Update existing record with new information
+            if result:
+                # Update existing record
                 cursor.execute(
                     """
                     UPDATE processed_emails 
-                    SET from_addr = ?, to_addr = ?, subject = ?, date = ?, category = ?, raw_message = ?
-                    WHERE account_name = ? AND email_id = ?
+                    SET category = ?, folder = ?, processed_date = CURRENT_TIMESTAMP
+                    WHERE account_name = ? AND hash_id = ?
                     """,
-                    (
-                        email.from_addr[:255] if email.from_addr else None,
-                        email.to_addr[:255] if email.to_addr else None,
-                        email.subject[:255] if email.subject else None,
-                        email.date,
-                        category,
-                        email.raw_message,
-                        account_name,
-                        email_id
-                    )
+                    (category, email.folder, account_name, hash_id)
                 )
             else:
                 # Insert new record
                 cursor.execute(
                     """
-                    INSERT INTO processed_emails 
-                    (account_name, email_id, from_addr, to_addr, subject, date, category, raw_message) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO processed_emails (
+                        account_name, hash_id, message_id, from_addr, to_addr, subject, 
+                        body, date, folder, category
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        account_name, 
-                        email_id, 
-                        email.from_addr[:255] if email.from_addr else None,
-                        email.to_addr[:255] if email.to_addr else None,
-                        email.subject[:255] if email.subject else None,
-                        email.date,
-                        category,
-                        email.raw_message
+                        account_name, hash_id, email.message_id, email.from_addr, email.to_addr,
+                        email.subject, email.body, email.date.isoformat(), email.folder, category
                     )
                 )
             
-            logger.debug(
-                f"Marked email as processed: {account_name} | "
-                f"From: {email.from_addr[:40] if email.from_addr else 'None'} | "
-                f"Subject: {email.subject[:40] if email.subject else 'None'} | "
-                f"Category: {category or 'None'}"
-            )
+            logger.debug(f"Marked email {hash_id} as processed with category {category}")
         
         self._execute_with_connection(mark_email)
     
@@ -514,4 +502,70 @@ class SQLiteStateManager:
             return stats
         except Exception as e:
             logger.error(f"Error getting category stats: {e}")
-            return {} 
+            return {}
+
+    def get_all_categories(self) -> List[dict]:
+        """Get all categories from the database.
+        
+        Returns:
+            List of dictionaries containing category information
+        """
+        try:
+            conn = sqlite3.connect(self.db_file_path)
+            conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM categories ORDER BY name")
+            
+            # Convert rows to dictionaries
+            categories = []
+            for row in cursor.fetchall():
+                categories.append(dict(row))
+            
+            conn.close()
+            return categories
+        except Exception as e:
+            logger.error(f"Error getting categories: {e}")
+            return []
+
+    def get_all_emails_with_categories(self) -> List[Tuple[Email, Category]]:
+        """Get all processed emails with their categories.
+        
+        Returns:
+            List of tuples containing (Email, Category) pairs
+        """
+        def get_emails(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    pe.account_name, pe.hash_id, pe.message_id, pe.from_addr, pe.to_addr, 
+                    pe.subject, pe.body, pe.date, pe.folder, pe.category,
+                    c.name, c.description, c.foldername
+                FROM processed_emails pe
+                LEFT JOIN categories c ON pe.category = c.name
+                WHERE pe.category IS NOT NULL
+            """)
+            
+            results = []
+            for row in cursor.fetchall():
+                email = Email(
+                    from_addr=row[3],
+                    to_addr=row[4],
+                    subject=row[5],
+                    body=row[6],
+                    date=datetime.fromisoformat(row[7]),
+                    folder=row[8] or "INBOX",
+                    message_id=row[2]
+                )
+                
+                category = Category(
+                    name=row[10],
+                    description=row[11],
+                    foldername=row[12] or "INBOX"
+                ) if row[10] else None
+                
+                results.append((email, category))
+            
+            return results
+        
+        return self._execute_with_connection(get_emails) 

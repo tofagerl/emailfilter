@@ -24,12 +24,19 @@ class Email:
     date: str
     body: str
     raw_message: bytes
-    msg_id: Optional[int] = None
+    message_id: Optional[str] = None
     folder: Optional[str] = None
+    attachments: Optional[List[bytes]] = field(default_factory=list)
     
     @classmethod
     def from_message(cls, message: Message, msg_id: Optional[int] = None) -> 'Email':
         """Create an Email instance from an email.message.Message."""
+        attachments = []
+        if message.is_multipart():
+            for part in message.walk():
+                if part.get_content_type() != "text/plain" and part.get("Content-Disposition", "").startswith("attachment"):
+                    attachments.append(part.get_payload(decode=True))
+        
         return cls(
             subject=message.get("Subject", ""),
             from_addr=message.get("From", ""),
@@ -37,7 +44,8 @@ class Email:
             date=message.get("Date", ""),
             body=cls._extract_body(message),
             raw_message=message.as_bytes(),
-            msg_id=msg_id
+            message_id=message.get("Message-ID", ""),
+            attachments=attachments
         )
     
     @staticmethod
@@ -76,13 +84,13 @@ class Email:
 class EmailAccount:
     """Represents an email account configuration."""
     name: str
-    email_address: str
+    email: str
     password: str
     imap_server: str
     imap_port: int = 993
     ssl: bool = True
-    folders: List[str] = None
-    categories: List[Category] = None
+    folders: List[str] = field(default_factory=list)
+    categories: List[Category] = field(default_factory=list)
     
     def __post_init__(self):
         if self.folders is None:
@@ -99,7 +107,7 @@ class EmailAccount:
             ]
     
     def __str__(self) -> str:
-        return f"{self.name} ({self.email_address})"
+        return f"{self.name} ({self.email})"
     
     def get_category_names(self) -> List[str]:
         """Get list of category names for this account."""
