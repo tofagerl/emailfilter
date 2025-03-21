@@ -309,13 +309,15 @@ Use the category descriptions to guide your decision.
     def _validate_category(
         self,
         result: Dict[str, Any],
-        valid_categories: List[str]
+        valid_categories: List[str],
+        categories: List[Category]
     ) -> Dict[str, Any]:
         """Validate and normalize a category in a result.
         
         Args:
             result: The result dictionary
             valid_categories: List of valid category names (uppercase)
+            categories: List of Category objects
             
         Returns:
             The validated and normalized result dictionary
@@ -324,13 +326,17 @@ Use the category descriptions to guide your decision.
         if "category" in result:
             category = result["category"].upper()
             if category in valid_categories:
-                result["category"] = category
+                result["category"] = next((cat for cat in categories if cat.name == category), None)
             else:
                 # Default to INBOX if category is invalid
                 logger.warning(f"Invalid category: {category}, defaulting to INBOX")
-                result["category"] = "INBOX"
+                result["category"] = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
+                result["confidence"] = 0
+                result["reasoning"] = f"Invalid category: {category}, defaulting to INBOX"
         else:
-            result["category"] = "INBOX"
+            result["category"] = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
+            result["confidence"] = 0
+            result["reasoning"] = "Missing category in response, defaulting to INBOX"
         
         return result
     
@@ -361,24 +367,31 @@ Use the category descriptions to guide your decision.
             for json_obj in json_objects:
                 try:
                     result = self._parse_json_object(json_obj)
-                    result = self._validate_category(result, valid_categories)
+                    result = self._validate_category(result, valid_categories, categories)
                     results.append(result)
                 except json.JSONDecodeError:
                     logger.error(f"Failed to parse JSON object: {json_obj}")
+                    inbox_category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
                     results.append({
-                        "category": "INBOX",
+                        "category": inbox_category,
                         "confidence": 0,
                         "reasoning": "Failed to parse response"
                     })
         except Exception as e:
             logger.error(f"Error parsing response: {e}")
             # Fallback: create default results
-            results = [{"category": "INBOX", "confidence": 0, "reasoning": "Failed to parse response"}] * batch_size
+            inbox_category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
+            results = [{
+                "category": inbox_category,
+                "confidence": 0,
+                "reasoning": "Failed to parse response"
+            }] * batch_size
         
         # Ensure we have a result for each email
         while len(results) < batch_size:
+            inbox_category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
             results.append({
-                "category": "INBOX",
+                "category": inbox_category,
                 "confidence": 0,
                 "reasoning": "Missing from response"
             })
@@ -431,8 +444,9 @@ Use the category descriptions to guide your decision.
         except APIError as e:
             logger.error(f"API error during categorization: {e}")
             # Fallback: categorize all as inbox
+            inbox_category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
             fallback_results = [{
-                "category": "INBOX",
+                "category": inbox_category,
                 "confidence": 0,
                 "reasoning": f"API error: {str(e)}"
             }] * batch_size
@@ -449,12 +463,13 @@ Use the category descriptions to guide your decision.
             return fallback_results
         except Exception as e:
             logger.error(f"Unexpected error during categorization: {e}")
-            # Fallback: categorize all as inbox
+            # Return default categories for all emails
+            inbox_category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
             return [{
-                "category": "INBOX",
+                "category": inbox_category,
                 "confidence": 0,
-                "reasoning": f"Unexpected error: {str(e)}"
-            }] * batch_size
+                "reasoning": f"Error during categorization: {str(e)}"
+            } for _ in range(len(emails))]
 
 
 # For backward compatibility with existing code
@@ -517,16 +532,23 @@ def batch_categorize_emails_for_account(emails, account, batch_size=10, model="g
         List of dictionaries with category information
     """
     try:
-        # Convert Email objects to dictionaries
+        # Convert Email objects to dictionaries and check for pre-defined categories
         email_dicts = []
+        results = []
         for email in emails:
-            email_dicts.append({
-                'from': email.from_addr,
-                'to': email.to_addr,
-                'subject': email.subject,
-                'date': email.date,
-                'body': email.body
-            })
+            if isinstance(email, dict):
+                email_dicts.append(email)
+                results.append(None)  # Placeholder for later categorization
+            else:
+                email_dict = {
+                    'from': email.from_addr,
+                    'to': email.to_addr,
+                    'subject': email.subject,
+                    'date': email.date,
+                    'body': email.body
+                }
+                email_dicts.append(email_dict)
+                results.append(None)  # Placeholder for later categorization
         
         # Create categorizer config
         config = CategorizerConfig(model=model, batch_size=batch_size)
@@ -537,14 +559,28 @@ def batch_categorize_emails_for_account(emails, account, batch_size=10, model="g
         # Get categories from account
         categories = [Category(c.name, c.description, c.foldername) for c in account.categories]
         
-        # Categorize emails
-        results = categorizer.categorize_emails(email_dicts, categories)
+        # Only categorize emails that don't have pre-defined categories
+        uncategorized_emails = [email for i, email in enumerate(email_dicts) if results[i] is None]
+        if uncategorized_emails:
+            api_results = categorizer.categorize_emails(uncategorized_emails, categories)
+            
+            # Merge results
+            j = 0
+            for i in range(len(results)):
+                if results[i] is None:
+                    results[i] = api_results[j]
+                    j += 1
         
         return results
     except Exception as e:
         logger.error(f"Unexpected error during categorization: {e}")
         # Return default categories for all emails
-        return [{"category": "INBOX"} for _ in range(len(emails))]
+        inbox_category = next((cat for cat in account.categories if cat.name == "INBOX"), account.categories[0])
+        return [{
+            "category": Category(inbox_category.name, inbox_category.description, inbox_category.foldername),
+            "confidence": 0,
+            "reasoning": f"Error during categorization: {str(e)}"
+        } for _ in range(len(emails))]
 
 
 # Initialize global categorizer for backward compatibility

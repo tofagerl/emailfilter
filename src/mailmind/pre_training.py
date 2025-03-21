@@ -131,16 +131,42 @@ class PreTrainingManager:
                 # Get emails from this category's folder
                 folder_emails = self.imap_manager.fetch_emails_from_folder(category.foldername)
                 
-                for email_obj in folder_emails:
-                    # Check if this email exists in our database
-                    if not self.state_manager.is_email_processed(account.name, email_obj):
-                        # Email doesn't exist - add it to database
-                        logger.info(f"New email {email_obj.message_id} found in category {category.name}")
-                        self.state_manager.mark_email_as_processed(
-                            account.name,
-                            email_obj,
-                            category.name
-                        )
+                # Categorize emails in batches
+                batch_size = 10
+                for i in range(0, len(folder_emails), batch_size):
+                    batch = folder_emails[i:i+batch_size]
+                    # Convert Email objects to dictionaries
+                    email_dicts = [
+                        {
+                            'from': email.from_addr,
+                            'to': email.to_addr,
+                            'subject': email.subject,
+                            'date': str(email.date),
+                            'body': email.body
+                        }
+                        for email in batch
+                    ]
+                    results = self.categorizer.categorize_emails(email_dicts, categories)
+                    
+                    for j, email_obj in enumerate(batch):
+                        if j < len(results):
+                            result = results[j]
+                            category = result.get("category")
+                            if category is None:
+                                category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
+                            elif isinstance(category, str):
+                                # Convert string category to Category object
+                                category = next((cat for cat in categories if cat.name == category.upper()), 
+                                             next((cat for cat in categories if cat.name == "INBOX"), categories[0]))
+                            # Check if this email exists in our database
+                            if not self.state_manager.is_email_processed(account.name, email_obj):
+                                # Email doesn't exist - add it to database with category
+                                logger.info(f"New email {email_obj.message_id} found in category {category.name}")
+                                self.state_manager.mark_email_as_processed(
+                                    account.name,
+                                    email_obj,
+                                    category
+                                )
         finally:
             # Disconnect from IMAP server
             self.imap_manager.disconnect(account.name)
@@ -154,14 +180,19 @@ class PreTrainingManager:
             
         # Convert to DataFrame for easier processing
         data = []
-        for email in emails:
-            data.append({
-                'message_id': email.message_id,
-                'content': email.body,
-                'category': email.category.name if email.category else 'uncategorized'
-            })
+        for email, category in emails:
+            if category:  # Only include emails with valid categories
+                data.append({
+                    'message_id': email.message_id,
+                    'content': email.body,
+                    'category': category.name
+                })
             
         df = pd.DataFrame(data)
+        
+        if df.empty:
+            logger.warning("No valid categorized emails found")
+            return pd.DataFrame(), pd.DataFrame()
         
         # Filter categories with sufficient samples
         category_counts = df['category'].value_counts()
@@ -192,9 +223,9 @@ class PreTrainingManager:
         emails = self.state_manager.get_all_emails_with_categories()
         distribution = {}
         
-        for email in emails:
-            category = email.category.name if email.category else 'uncategorized'
-            distribution[category] = distribution.get(category, 0) + 1
+        for email, category in emails:
+            category_name = category.name if category else 'uncategorized'
+            distribution[category_name] = distribution.get(category_name, 0) + 1
             
         return distribution
         

@@ -244,11 +244,14 @@ class SQLiteStateManager:
         """Mark an email as processed.
         
         Args:
-            account_name: Name of the email account
+            account_name: The account name
             email: The email object
-            category: The category assigned to the email (optional)
+            category: The category name or Category object
         """
         hash_id = self._generate_email_id(account_name, email)
+        
+        # Get category name if it's a Category object
+        category_name = category.name if hasattr(category, 'name') else category
         
         def mark_email(conn):
             cursor = conn.cursor()
@@ -268,7 +271,7 @@ class SQLiteStateManager:
                     SET category = ?, folder = ?, processed_date = CURRENT_TIMESTAMP
                     WHERE account_name = ? AND hash_id = ?
                     """,
-                    (category, email.folder, account_name, hash_id)
+                    (category_name, email.folder, account_name, hash_id)
                 )
             else:
                 # Insert new record
@@ -281,11 +284,11 @@ class SQLiteStateManager:
                     """,
                     (
                         account_name, hash_id, email.message_id, email.from_addr, email.to_addr,
-                        email.subject, email.body, email.date.isoformat(), email.folder, category
+                        email.subject, email.body, email.date.isoformat(), email.folder, category_name
                     )
                 )
             
-            logger.debug(f"Marked email {hash_id} as processed with category {category}")
+            logger.debug(f"Marked email {hash_id} as processed with category {category_name}")
         
         self._execute_with_connection(mark_email)
     
@@ -543,7 +546,6 @@ class SQLiteStateManager:
                     c.name, c.description, c.foldername
                 FROM processed_emails pe
                 LEFT JOIN categories c ON pe.category = c.name
-                WHERE pe.category IS NOT NULL
             """)
             
             results = []
@@ -555,14 +557,24 @@ class SQLiteStateManager:
                     body=row[6],
                     date=datetime.fromisoformat(row[7]),
                     folder=row[8] or "INBOX",
-                    message_id=row[2]
+                    message_id=row[2],
+                    raw_message=b""  # Empty bytes for test data
                 )
                 
-                category = Category(
-                    name=row[10],
-                    description=row[11],
-                    foldername=row[12] or "INBOX"
-                ) if row[10] else None
+                # If category is not found in categories table but exists in processed_emails,
+                # create a Category object from the processed_emails data
+                if row[10] is None and row[9] is not None:
+                    category = Category(
+                        name=row[9],
+                        description="",
+                        foldername=row[8] or "INBOX"
+                    )
+                else:
+                    category = Category(
+                        name=row[10],
+                        description=row[11],
+                        foldername=row[12] or "INBOX"
+                    ) if row[10] else None
                 
                 results.append((email, category))
             

@@ -147,24 +147,35 @@ class IMAPManager:
                     msg = email.message_from_bytes(msg_data[b'BODY.PEEK[]'])
                     envelope = msg_data.get(b'ENVELOPE')
                     
-                    if envelope:
-                        msg_date = datetime.strptime(
-                            envelope[0].decode(), 
-                            '%a, %d %b %Y %H:%M:%S %z'
-                        ) if envelope[0] else None
+                    if envelope and envelope[0]:
+                        try:
+                            msg_date = datetime.strptime(
+                                envelope[0].decode(), 
+                                '%a, %d %b %Y %H:%M:%S %z'
+                            )
+                        except ValueError:
+                            try:
+                                msg_date = datetime.strptime(
+                                    envelope[0].decode(), 
+                                    '%a, %d %b %Y %H:%M:%S +0000'
+                                )
+                            except ValueError:
+                                msg_date = datetime.now()
                     else:
                         msg_date = datetime.now()
 
-                    emails.append(Email(
-                        subject=msg['Subject'],
-                        from_addr=msg['From'],
-                        to_addr=msg['To'],
+                    email_obj = Email(
+                        subject=msg.get('Subject', ''),
+                        from_addr=msg.get('From', ''),
+                        to_addr=msg.get('To', ''),
                         body=self._get_email_body(msg),
                         date=msg_date,
                         raw_message=msg.as_bytes(),
-                        message_id=msg['Message-ID'],
+                        message_id=msg.get('Message-ID', ''),
                         folder=folder_name
-                    ))
+                    )
+                    
+                    emails.append(email_obj)
                 except Exception as e:
                     logger.error(f"Error processing email {msg_id}: {str(e)}")
                     continue
