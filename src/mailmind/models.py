@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from email.message import Message
-from pydantic import BaseModel, Field, EmailStr, validator
+from pydantic import BaseModel, Field, EmailStr, validator, field_validator
 
 @dataclass
 class Category:
@@ -147,8 +147,9 @@ class CategoryConfig(BaseModel):
     description: str = Field(default="", description="Description of the category")
     foldername: str = Field(..., description="IMAP folder name for this category")
     
-    @validator('name')
-    def name_uppercase(cls, v):
+    @field_validator('name')
+    @classmethod
+    def name_uppercase(cls, v: str) -> str:
         return v.upper()
 
 class EmailAccountConfig(BaseModel):
