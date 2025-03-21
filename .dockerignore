@@ -21,6 +21,7 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -53,3 +54,35 @@ docs/
 *.swp
 *.swo
 *~
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Development
+.git
+.gitignore
+.env
+.venv
+venv/
+ENV/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Local config
+config.yaml
+config.yaml.example
+
+# Logs
+logs/
+*.log
