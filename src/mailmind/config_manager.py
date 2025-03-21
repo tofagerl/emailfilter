@@ -169,7 +169,7 @@ class ConfigManager:
             return ProcessingOptions()
         return ProcessingOptions(
             max_emails_per_run=self.config.processing.max_emails_per_run,
-            batch_size=self.config.processing.batch_size,
+            batch_size=self.config.openai.batch_size,
             idle_timeout=self.config.processing.idle_timeout,
             move_emails=self.config.processing.move_emails,
             model=self.config.openai.model
