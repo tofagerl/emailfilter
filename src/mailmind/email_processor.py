@@ -15,6 +15,7 @@ from .models import Email, EmailAccount, ProcessingOptions
 from .config_manager import ConfigManager
 from .sqlite_state_manager import SQLiteStateManager
 from .imap_manager import IMAPManager
+from .pre_training import PreTrainingManager
 
 logger = logging.getLogger(__name__)
 
@@ -534,27 +535,36 @@ def main(config_path: str, daemon_mode: bool = False) -> None:
     """Main entry point for the email processor.
     
     Args:
-        config_path: Path to the YAML configuration file
-        daemon_mode: Whether to run in daemon mode (continuous monitoring)
+        config_path: Path to the configuration file
+        daemon_mode: Whether to run in continuous monitoring mode
     """
     try:
         processor = EmailProcessor(config_path)
         
+        # Initialize pre-training manager
+        pre_training = PreTrainingManager(
+            state_manager=processor.state_manager,
+            email_processor=processor,
+            categorizer=categorizer,
+            imap_manager=processor.imap_manager
+        )
+        
         if daemon_mode:
-            logger.info("Starting in daemon mode")
+            # Start pre-training monitoring in a separate thread
+            pre_training_thread = threading.Thread(
+                target=pre_training.monitor_category_changes,
+                kwargs={'check_interval': 600, 'lookback_days': 7},
+                daemon=True
+            )
+            pre_training_thread.start()
+            logger.info("Started pre-training monitoring thread")
+            
+            # Start main email processing
             processor.start_monitoring()
         else:
-            logger.info("Processing emails (one-time run)")
-            results = processor.process_all_accounts()
+            # Single run mode
+            processor.process_all_accounts()
             
-            # Print results
-            for account_name, account_results in results.items():
-                print(f"Results for {account_name}:")
-                for folder, category_counts in account_results.items():
-                    print(f"  Folder: {folder}")
-                    for category, count in category_counts.items():
-                        if count > 0:
-                            print(f"    {category}: {count}")
     except Exception as e:
         logger.error(f"Error in main: {e}")
         sys.exit(1) 
