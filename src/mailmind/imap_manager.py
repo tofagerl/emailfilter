@@ -3,9 +3,9 @@
 import email
 import logging
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
-from imapclient import IMAPClient
+from imapclient import IMAPClient, IMAPClientError
 
 from .models import Email, EmailAccount
 
@@ -21,6 +21,13 @@ class IMAPManager:
         self.connection_timeout = 30  # Seconds to wait before reconnecting
         self._current_folders = {}  # Track currently selected folders
     
+    def _clear_response_buffer(self, client: IMAPClient) -> None:
+        """Clear the IMAP response buffer."""
+        try:
+            client._imap._get_response()
+        except Exception as e:
+            logger.debug(f"Error clearing response buffer: {e}")
+    
     def connect(self, account: EmailAccount) -> Optional[IMAPClient]:
         """Connect to an IMAP server.
         
@@ -34,11 +41,13 @@ class IMAPManager:
             # Check if already connected and connection is still valid
             if account.name in self.connections:
                 conn_info = self.connections[account.name]
-                if conn_info['client'].is_connected():
-                    # Update last used timestamp
+                try:
+                    # Try a simple command to check connection
+                    conn_info['client'].noop()
+                    self._clear_response_buffer(conn_info['client'])
                     conn_info['last_used'] = time.time()
                     return conn_info['client']
-                else:
+                except IMAPClientError:
                     # Connection exists but is invalid, clean it up
                     self.disconnect(account.name)
             
@@ -50,6 +59,7 @@ class IMAPManager:
             logger.debug(f"Connecting to {account}")
             client = IMAPClient(account.imap_server, port=account.imap_port, ssl=account.ssl)
             client.login(account.email_address, account.password)
+            self._clear_response_buffer(client)
             
             # Store connection with timestamp
             self.connections[account.name] = {
@@ -89,17 +99,17 @@ class IMAPManager:
                 conn_info = self.connections[account_name]
                 client = conn_info['client']
                 
-                # Only try to logout if the connection is still valid
-                if client.is_connected():
-                    try:
-                        client.logout()
-                    except Exception as e:
-                        logger.warning(f"Error during logout for {account_name}: {e}")
-                
-                del self.connections[account_name]
-                if account_name in self._current_folders:
-                    del self._current_folders[account_name]
-                logger.debug(f"Disconnected from {account_name}")
+                try:
+                    # Try to logout if possible
+                    client.logout()
+                except Exception as e:
+                    logger.warning(f"Error during logout for {account_name}: {e}")
+                finally:
+                    # Always clean up the connection
+                    del self.connections[account_name]
+                    if account_name in self._current_folders:
+                        del self._current_folders[account_name]
+                    logger.debug(f"Disconnected from {account_name}")
         except Exception as e:
             logger.error(f"Error disconnecting from {account_name}: {e}")
             # Ensure connection is removed even if logout fails
@@ -113,7 +123,7 @@ class IMAPManager:
         for account_name in list(self.connections.keys()):
             self.disconnect(account_name)
     
-    def _select_folder_if_needed(self, client: IMAPClient, account_name: str, folder: str) -> bool:
+    def _select_folder_if_needed(self, client: IMAPClient, account_name: str, folder: str) -> Tuple[bool, Optional[IMAPClient]]:
         """Select a folder only if it's not already selected.
         
         Args:
@@ -122,20 +132,33 @@ class IMAPManager:
             folder: Folder to select
             
         Returns:
-            True if folder was selected successfully, False otherwise
+            Tuple of (success, new_client if reconnected)
         """
         try:
             current_folder = self._current_folders.get(account_name)
             if current_folder != folder:
+                # Check connection before selecting
+                try:
+                    client.noop()
+                    self._clear_response_buffer(client)
+                except IMAPClientError:
+                    # Connection lost, try to reconnect
+                    if account_name in self.connections:
+                        account = self.connections[account_name]['account']
+                        new_client = self.connect(account)
+                        if new_client:
+                            client = new_client
+                        else:
+                            return False, None
+                
                 client.select_folder(folder)
+                self._clear_response_buffer(client)
                 self._current_folders[account_name] = folder
                 logger.debug(f"Selected folder: {folder}")
-                # Clear response buffer after folder selection
-                client._imap._get_response()
-            return True
+            return True, client
         except Exception as e:
             logger.error(f"Error selecting folder {folder}: {e}")
-            return False
+            return False, None
     
     def get_emails(
         self, client: IMAPClient, folder: str, max_emails: int
@@ -163,11 +186,15 @@ class IMAPManager:
                 return emails
             
             # Select folder if needed
-            if not self._select_folder_if_needed(client, account_name, folder):
+            success, new_client = self._select_folder_if_needed(client, account_name, folder)
+            if not success:
                 return emails
+            if new_client:
+                client = new_client
             
             # Get all message IDs
             msg_ids = client.search(['ALL'])
+            self._clear_response_buffer(client)
             if not msg_ids:
                 logger.debug(f"No emails found in {folder}")
                 return emails
@@ -184,6 +211,7 @@ class IMAPManager:
                 try:
                     # Fetch email data
                     raw_emails = client.fetch(batch_ids, ['BODY.PEEK[]'])
+                    self._clear_response_buffer(client)
                     
                     for msg_id, data in raw_emails.items():
                         try:
@@ -212,8 +240,6 @@ class IMAPManager:
                     
                     # Clear batch data from memory
                     del raw_emails
-                    # Clear response buffer
-                    client._imap._get_response()
                     
                 except Exception as e:
                     logger.error(f"Error fetching batch: {e}")
