@@ -369,15 +369,21 @@ class EmailProcessor:
             account: The email account to monitor
         """
         global running
+        reconnect_delay = 60  # Initial delay for reconnection attempts
+        max_reconnect_delay = 300  # Maximum delay (5 minutes)
         
         while running:
             try:
                 # Connect to account
                 client = self.imap_manager.connect(account)
                 if not client:
-                    logger.error(f"Failed to connect to {account}, retrying in 60 seconds")
-                    time.sleep(60)
+                    logger.error(f"Failed to connect to {account}, retrying in {reconnect_delay} seconds")
+                    time.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
                     continue
+                
+                # Reset reconnect delay on successful connection
+                reconnect_delay = 60
                 
                 try:
                     # Process each folder
@@ -386,6 +392,11 @@ class EmailProcessor:
                             break
                         
                         try:
+                            # Check connection before processing folder
+                            if not self.imap_manager._is_connection_alive(client):
+                                logger.warning("Connection lost, reconnecting...")
+                                raise ConnectionError("Connection lost")
+                            
                             # Select folder
                             client.select_folder(folder)
                             
@@ -430,11 +441,19 @@ class EmailProcessor:
                             
                             # Now enter IDLE mode to wait for new emails
                             logger.debug(f"Waiting for new emails in {folder}")
+                            
+                            # Set shorter IDLE timeout and handle reconnection
+                            idle_timeout = min(300, self.config_manager.options.idle_timeout)  # Max 5 minutes
                             client.idle()
                             
-                            # Wait for new emails or timeout
-                            responses = client.idle_check(timeout=self.config_manager.options.idle_timeout)
-                            client.idle_done()
+                            try:
+                                responses = client.idle_check(timeout=idle_timeout)
+                            finally:
+                                try:
+                                    client.idle_done()
+                                except Exception as e:
+                                    logger.warning(f"Error ending IDLE mode: {e}")
+                                    raise ConnectionError("Failed to end IDLE mode")
                             
                             # Log all responses for debugging
                             logger.debug(f"IDLE responses: {responses}")
@@ -447,6 +466,10 @@ class EmailProcessor:
                                     logger.debug(f"Detected new email: {response}")
                                     break
                             
+                            # Verify connection is still alive
+                            if not self.imap_manager._is_connection_alive(client):
+                                raise ConnectionError("Connection lost after IDLE")
+                            
                             # Double-check by comparing message counts
                             post_idle_messages = client.search(['ALL'])
                             post_idle_count = len(post_idle_messages)
@@ -456,51 +479,55 @@ class EmailProcessor:
                                 logger.debug(f"New messages detected: {post_idle_count - pre_idle_count}")
                                 has_new_emails = True
                             
-                            # Always check for new emails after IDLE, even if no EXISTS notification
-                            # This helps catch emails that might have been missed
-                            logger.debug(f"Checking for new emails after IDLE (has_new_emails={has_new_emails})")
-                            
-                            # Get all emails again
-                            emails = self.imap_manager.get_emails(
-                                client, 
-                                folder, 
-                                self.config_manager.options.max_emails_per_run
-                            )
-                            
-                            # Filter out already processed emails
-                            unprocessed_emails = {}
-                            for msg_id, email_obj in emails.items():
-                                if not self.state_manager.is_email_processed(account.name, email_obj):
-                                    unprocessed_emails[msg_id] = email_obj
-                            
-                            if unprocessed_emails:
-                                logger.info(f"Found {len(unprocessed_emails)} unprocessed emails after IDLE")
-                                # Categorize emails
-                                categorized_emails = self.categorize_emails(
-                                    client,
-                                    unprocessed_emails,
-                                    account,
-                                    self.config_manager.options.batch_size
+                            # Process any new emails
+                            if has_new_emails:
+                                emails = self.imap_manager.get_emails(
+                                    client, 
+                                    folder, 
+                                    self.config_manager.options.max_emails_per_run
                                 )
                                 
-                                # Process categorized emails
-                                self.process_categorized_emails(
-                                    client,
-                                    categorized_emails,
-                                    account,
-                                    folder
-                                )
-                            else:
-                                logger.debug(f"No unprocessed emails found after IDLE")
+                                # Filter out already processed emails
+                                unprocessed_emails = {}
+                                for msg_id, email_obj in emails.items():
+                                    if not self.state_manager.is_email_processed(account.name, email_obj):
+                                        unprocessed_emails[msg_id] = email_obj
+                                
+                                if unprocessed_emails:
+                                    logger.info(f"Found {len(unprocessed_emails)} unprocessed emails after IDLE")
+                                    # Categorize emails
+                                    categorized_emails = self.categorize_emails(
+                                        client,
+                                        unprocessed_emails,
+                                        account,
+                                        self.config_manager.options.batch_size
+                                    )
+                                    
+                                    # Process categorized emails
+                                    self.process_categorized_emails(
+                                        client,
+                                        categorized_emails,
+                                        account,
+                                        folder
+                                    )
+                                else:
+                                    logger.debug(f"No unprocessed emails found after IDLE")
+                        except ConnectionError as e:
+                            logger.error(f"Connection error in folder {folder}: {e}")
+                            raise  # Re-raise to trigger reconnection
                         except Exception as e:
                             logger.error(f"Error monitoring folder {folder}: {e}")
-                            time.sleep(60)  # Wait before retrying
-                finally:
-                    # Disconnect
-                    self.imap_manager.disconnect(account.name)
+                            if not self.imap_manager._is_connection_alive(client):
+                                raise ConnectionError("Connection lost during folder processing")
+                            time.sleep(60)  # Wait before retrying folder
+                except Exception as e:
+                    logger.error(f"Error in monitoring loop for {account}: {e}")
+                    time.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
             except Exception as e:
                 logger.error(f"Error in monitoring loop for {account}: {e}")
-                time.sleep(60)  # Wait before retrying
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
 
 def main(config_path: str, daemon_mode: bool = False) -> None:

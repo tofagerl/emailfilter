@@ -89,6 +89,21 @@ class IMAPManager:
         
         self.disconnect(oldest_account)
     
+    def _is_connection_alive(self, client: IMAPClient) -> bool:
+        """Check if the IMAP connection is still alive.
+        
+        Args:
+            client: The IMAPClient object
+            
+        Returns:
+            True if connection is alive, False otherwise
+        """
+        try:
+            client.noop()
+            return True
+        except Exception:
+            return False
+
     def disconnect(self, account_name: str) -> None:
         """Disconnect from an IMAP server.
         
@@ -100,8 +115,8 @@ class IMAPManager:
                 conn_info = self.connections[account_name]
                 client = conn_info['client']
                 
-                # Only try to logout if the connection is still valid
-                if client.is_connected():
+                # Only try to logout if the connection appears alive
+                if self._is_connection_alive(client):
                     try:
                         client.logout()
                     except Exception as e:
