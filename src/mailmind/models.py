@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from email.message import Message
+from pydantic import BaseModel, Field, EmailStr, validator
 
 @dataclass
 class Category:
@@ -138,4 +139,57 @@ class ProcessingOptions:
     model: str = "gpt-4o-mini"  # Default to GPT-4o mini
     
     def __post_init__(self):
-        pass 
+        pass
+
+class CategoryConfig(BaseModel):
+    """Configuration for an email category."""
+    name: str = Field(..., description="Name of the category")
+    description: str = Field(default="", description="Description of the category")
+    foldername: str = Field(..., description="IMAP folder name for this category")
+    
+    @validator('name')
+    def name_uppercase(cls, v):
+        return v.upper()
+
+class EmailAccountConfig(BaseModel):
+    """Configuration for an email account."""
+    name: str = Field(..., description="Name of the account")
+    email: EmailStr = Field(..., description="Email address")
+    password: str = Field(..., description="Email password or app password")
+    imap_server: str = Field(..., description="IMAP server address")
+    imap_port: int = Field(default=993, description="IMAP server port")
+    ssl: bool = Field(default=True, description="Use SSL for IMAP connection")
+    folders: List[str] = Field(default_factory=lambda: ["INBOX"], description="List of folders to monitor")
+    categories: List[CategoryConfig] = Field(default_factory=list, description="List of categories for this account")
+
+class OpenAIConfig(BaseModel):
+    """Configuration for OpenAI API."""
+    api_key: str = Field(..., description="OpenAI API key")
+    model: str = Field(default="gpt-4o-mini", description="OpenAI model to use")
+    temperature: float = Field(default=0.7, ge=0.0, le=1.0, description="Model temperature")
+    max_tokens: int = Field(default=1000, gt=0, description="Maximum tokens to generate")
+    batch_size: int = Field(default=10, gt=0, description="Batch size for API calls")
+
+class ProcessingConfig(BaseModel):
+    """Configuration for email processing."""
+    move_emails: bool = Field(default=True, description="Whether to move emails after categorization")
+    max_emails_per_run: int = Field(default=100, gt=0, description="Maximum emails to process per run")
+    lookback_days: int = Field(default=30, gt=0, description="Days to look back for processing")
+    min_samples_per_category: int = Field(default=5, ge=0, description="Minimum samples per category for training")
+    test_size: float = Field(default=0.2, ge=0.0, le=1.0, description="Test set size for training")
+    idle_timeout: int = Field(default=1740, gt=0, description="IMAP IDLE timeout in seconds")
+    reconnect_delay: int = Field(default=5, gt=0, description="Delay before reconnecting after error")
+
+class LoggingConfig(BaseModel):
+    """Configuration for logging."""
+    level: str = Field(default="INFO", description="Logging level")
+    file: Optional[str] = Field(default=None, description="Log file path")
+    format: str = Field(default="%(asctime)s - %(name)s - %(levelname)s - %(message)s", description="Log format")
+
+class Config(BaseModel):
+    """Main configuration model."""
+    version: str = Field(default="1.0", description="Configuration version")
+    openai: OpenAIConfig
+    accounts: List[EmailAccountConfig]
+    processing: ProcessingConfig
+    logging: LoggingConfig = Field(default_factory=LoggingConfig) 

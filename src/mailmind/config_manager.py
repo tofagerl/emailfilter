@@ -4,9 +4,12 @@ import yaml
 import logging
 import os
 from typing import Dict, List, Optional
+from pathlib import Path
 
-from .models import EmailAccount, ProcessingOptions, Category
-from . import categorizer
+from .models import (
+    Config, EmailAccount, ProcessingOptions, Category,
+    EmailAccountConfig, OpenAIConfig, ProcessingConfig, LoggingConfig
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,77 +23,109 @@ class ConfigManager:
             config_path: Path to the YAML configuration file
         """
         self.config_path = config_path
-        self.accounts: List[EmailAccount] = []
-        self.options: ProcessingOptions = ProcessingOptions()
-        self.openai_api_key: Optional[str] = None
+        self.config: Optional[Config] = None
         
         # Load configuration
         self._load_config()
     
     def _load_config(self) -> None:
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file and environment variables."""
         try:
+            # Load YAML config
             with open(self.config_path, "r") as f:
-                config = yaml.safe_load(f)
+                yaml_config = yaml.safe_load(f)
             
-            # Load accounts
-            for account_config in config.get("accounts", []):
-                # Load account-specific categories if defined
-                categories = None
-                if "categories" in account_config:
-                    categories = []
-                    for cat_config in account_config.get("categories", []):
-                        category = Category(
-                            name=cat_config.get("name", "").upper(),
-                            description=cat_config.get("description", ""),
-                            foldername=cat_config.get("folder", "INBOX")
-                        )
-                        categories.append(category)
-                
-                account = EmailAccount(
-                    name=account_config.get("name", ""),
-                    email=account_config.get("email", ""),
-                    password=account_config.get("password", ""),
-                    imap_server=account_config.get("imap_server", ""),
-                    imap_port=account_config.get("imap_port", 993),
-                    ssl=account_config.get("ssl", True),
-                    folders=account_config.get("folders", ["INBOX"]),
-                    categories=categories
-                )
-                self.accounts.append(account)
+            # Override with environment variables
+            env_config = self._load_env_config()
+            merged_config = self._merge_configs(yaml_config, env_config)
             
-            # Load OpenAI API key
-            self.openai_api_key = config.get("openai_api_key")
-            if not self.openai_api_key:
-                # Try environment variable
-                self.openai_api_key = os.environ.get("OPENAI_API_KEY")
-                if not self.openai_api_key:
-                    raise ValueError("OpenAI API key not found in config or environment")
-            
-            # Load OpenAI settings
-            openai_config = config.get("openai", {})
-            self.openai_model = openai_config.get("model", "gpt-4")
-            self.openai_temperature = openai_config.get("temperature", 0.7)
-            self.openai_max_tokens = openai_config.get("max_tokens", 1000)
-            
-            # Load processing options
-            processing_config = config.get("processing", {})
-            self.batch_size = processing_config.get("batch_size", 10)
-            self.lookback_days = processing_config.get("lookback_days", 30)
-            self.min_samples_per_category = processing_config.get("min_samples_per_category", 5)
-            self.test_size = processing_config.get("test_size", 0.2)
+            # Validate and convert to Pydantic model
+            self.config = Config(**merged_config)
             
             logger.debug("Configuration loaded successfully")
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
             raise
     
+    def _load_env_config(self) -> Dict:
+        """Load configuration from environment variables.
+        
+        Returns:
+            Dictionary of environment-based configuration
+        """
+        env_config = {
+            "openai": {
+                "api_key": os.environ.get("OPENAI_API_KEY"),
+                "model": os.environ.get("MAILMIND_OPENAI_MODEL"),
+                "temperature": os.environ.get("MAILMIND_OPENAI_TEMPERATURE"),
+                "max_tokens": os.environ.get("MAILMIND_OPENAI_MAX_TOKENS"),
+                "batch_size": os.environ.get("MAILMIND_OPENAI_BATCH_SIZE")
+            },
+            "processing": {
+                "move_emails": os.environ.get("MAILMIND_MOVE_EMAILS"),
+                "max_emails_per_run": os.environ.get("MAILMIND_MAX_EMAILS"),
+                "lookback_days": os.environ.get("MAILMIND_LOOKBACK_DAYS"),
+                "min_samples_per_category": os.environ.get("MAILMIND_MIN_SAMPLES"),
+                "test_size": os.environ.get("MAILMIND_TEST_SIZE"),
+                "idle_timeout": os.environ.get("MAILMIND_IDLE_TIMEOUT"),
+                "reconnect_delay": os.environ.get("MAILMIND_RECONNECT_DELAY")
+            },
+            "logging": {
+                "level": os.environ.get("MAILMIND_LOG_LEVEL"),
+                "file": os.environ.get("MAILMIND_LOG_FILE"),
+                "format": os.environ.get("MAILMIND_LOG_FORMAT")
+            }
+        }
+        
+        # Remove None values
+        return self._clean_dict(env_config)
+    
+    def _merge_configs(self, yaml_config: Dict, env_config: Dict) -> Dict:
+        """Merge YAML and environment configurations.
+        
+        Args:
+            yaml_config: Configuration from YAML file
+            env_config: Configuration from environment variables
+            
+        Returns:
+            Merged configuration dictionary
+        """
+        merged = yaml_config.copy()
+        
+        # Deep merge environment config
+        for section, values in env_config.items():
+            if section not in merged:
+                merged[section] = {}
+            if isinstance(values, dict):
+                merged[section].update(values)
+            else:
+                merged[section] = values
+        
+        return merged
+    
+    def _clean_dict(self, d: Dict) -> Dict:
+        """Remove None values from dictionary.
+        
+        Args:
+            d: Dictionary to clean
+            
+        Returns:
+            Cleaned dictionary
+        """
+        if not isinstance(d, dict):
+            return d
+        return {k: self._clean_dict(v) for k, v in d.items() if v is not None}
+    
     def validate(self) -> None:
         """Validate the loaded configuration."""
-        if not self.accounts:
+        if not self.config:
+            raise ValueError("Configuration not loaded")
+        
+        if not self.config.accounts:
             raise ValueError("No email accounts configured")
         
-        for account in self.accounts:
+        # Validate accounts
+        for account in self.config.accounts:
             if not account.name or not account.email or not account.password or not account.imap_server:
                 raise ValueError(f"Invalid account configuration for {account}")
             
@@ -102,6 +137,60 @@ class ConfigManager:
                 if category.name.upper() in category_names:
                     raise ValueError(f"Duplicate category name '{category.name}' for account {account.name}")
                 category_names.add(category.name.upper())
-        
-        if not self.openai_api_key:
-            raise ValueError("OpenAI API key not configured") 
+    
+    @property
+    def accounts(self) -> List[EmailAccount]:
+        """Get list of email accounts."""
+        if not self.config:
+            return []
+        return [
+            EmailAccount(
+                name=acc.name,
+                email=acc.email,
+                password=acc.password,
+                imap_server=acc.imap_server,
+                imap_port=acc.imap_port,
+                ssl=acc.ssl,
+                folders=acc.folders,
+                categories=[
+                    Category(
+                        name=cat.name,
+                        description=cat.description,
+                        foldername=cat.foldername
+                    ) for cat in acc.categories
+                ]
+            ) for acc in self.config.accounts
+        ]
+    
+    @property
+    def options(self) -> ProcessingOptions:
+        """Get processing options."""
+        if not self.config:
+            return ProcessingOptions()
+        return ProcessingOptions(
+            max_emails_per_run=self.config.processing.max_emails_per_run,
+            batch_size=self.config.processing.batch_size,
+            idle_timeout=self.config.processing.idle_timeout,
+            move_emails=self.config.processing.move_emails,
+            model=self.config.openai.model
+        )
+    
+    @property
+    def openai_api_key(self) -> Optional[str]:
+        """Get OpenAI API key."""
+        return self.config.openai.api_key if self.config else None
+    
+    @property
+    def openai_model(self) -> str:
+        """Get OpenAI model name."""
+        return self.config.openai.model if self.config else "gpt-4o-mini"
+    
+    @property
+    def openai_temperature(self) -> float:
+        """Get OpenAI temperature setting."""
+        return self.config.openai.temperature if self.config else 0.7
+    
+    @property
+    def openai_max_tokens(self) -> int:
+        """Get OpenAI max tokens setting."""
+        return self.config.openai.max_tokens if self.config else 1000 

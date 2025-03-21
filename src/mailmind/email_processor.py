@@ -552,7 +552,10 @@ def main(config_path: str, daemon_mode: bool = False) -> None:
             # Start pre-training monitoring in a separate thread
             pre_training_thread = threading.Thread(
                 target=pre_training.monitor_category_changes,
-                kwargs={'check_interval': 600, 'lookback_days': 7},
+                kwargs={
+                    'check_interval': 600,
+                    'lookback_days': processor.config_manager.lookback_days
+                },
                 daemon=True
             )
             pre_training_thread.start()
