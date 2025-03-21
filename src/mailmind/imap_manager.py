@@ -5,7 +5,8 @@ import logging
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
-from imapclient import IMAPClient, IMAPClientError
+from imapclient import IMAPClient
+from imapclient.exceptions import IMAPClientError, IMAPClientAbortError, IMAPClientReadOnlyError
 
 from .models import Email, EmailAccount
 
@@ -47,7 +48,7 @@ class IMAPManager:
                     self._clear_response_buffer(conn_info['client'])
                     conn_info['last_used'] = time.time()
                     return conn_info['client']
-                except IMAPClientError:
+                except Exception:
                     # Connection exists but is invalid, clean it up
                     self.disconnect(account.name)
             
@@ -99,17 +100,17 @@ class IMAPManager:
                 conn_info = self.connections[account_name]
                 client = conn_info['client']
                 
-                try:
-                    # Try to logout if possible
-                    client.logout()
-                except Exception as e:
-                    logger.warning(f"Error during logout for {account_name}: {e}")
-                finally:
-                    # Always clean up the connection
-                    del self.connections[account_name]
-                    if account_name in self._current_folders:
-                        del self._current_folders[account_name]
-                    logger.debug(f"Disconnected from {account_name}")
+                # Only try to logout if the connection is still valid
+                if client.is_connected():
+                    try:
+                        client.logout()
+                    except Exception as e:
+                        logger.warning(f"Error during logout for {account_name}: {e}")
+                
+                del self.connections[account_name]
+                if account_name in self._current_folders:
+                    del self._current_folders[account_name]
+                logger.debug(f"Disconnected from {account_name}")
         except Exception as e:
             logger.error(f"Error disconnecting from {account_name}: {e}")
             # Ensure connection is removed even if logout fails
@@ -141,7 +142,7 @@ class IMAPManager:
                 try:
                     client.noop()
                     self._clear_response_buffer(client)
-                except IMAPClientError:
+                except Exception:
                     # Connection lost, try to reconnect
                     if account_name in self.connections:
                         account = self.connections[account_name]['account']
@@ -189,12 +190,9 @@ class IMAPManager:
             success, new_client = self._select_folder_if_needed(client, account_name, folder)
             if not success:
                 return emails
-            if new_client:
-                client = new_client
             
             # Get all message IDs
             msg_ids = client.search(['ALL'])
-            self._clear_response_buffer(client)
             if not msg_ids:
                 logger.debug(f"No emails found in {folder}")
                 return emails
@@ -211,7 +209,6 @@ class IMAPManager:
                 try:
                     # Fetch email data
                     raw_emails = client.fetch(batch_ids, ['BODY.PEEK[]'])
-                    self._clear_response_buffer(client)
                     
                     for msg_id, data in raw_emails.items():
                         try:
@@ -240,6 +237,8 @@ class IMAPManager:
                     
                     # Clear batch data from memory
                     del raw_emails
+                    # Clear response buffer
+                    self._clear_response_buffer(client)
                     
                 except Exception as e:
                     logger.error(f"Error fetching batch: {e}")
