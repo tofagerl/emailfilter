@@ -84,6 +84,11 @@ class SQLiteStateManager:
                 cursor.execute("ALTER TABLE processed_emails ADD COLUMN category TEXT")
                 conn.commit()
                 logger.debug("Adding 'category' column to database")
+
+            if 'raw_message' not in columns:
+                cursor.execute("ALTER TABLE processed_emails ADD COLUMN raw_message BLOB")
+                conn.commit()
+                logger.debug("Adding 'raw_message' column to database")
             
             # Create index for faster lookups
             cursor.execute('''
@@ -253,7 +258,7 @@ class SQLiteStateManager:
                 cursor.execute(
                     """
                     UPDATE processed_emails 
-                    SET from_addr = ?, to_addr = ?, subject = ?, date = ?, category = ?
+                    SET from_addr = ?, to_addr = ?, subject = ?, date = ?, category = ?, raw_message = ?
                     WHERE account_name = ? AND email_id = ?
                     """,
                     (
@@ -262,6 +267,7 @@ class SQLiteStateManager:
                         email.subject[:255] if email.subject else None,
                         email.date,
                         category,
+                        email.raw_message,
                         account_name,
                         email_id
                     )
@@ -271,8 +277,8 @@ class SQLiteStateManager:
                 cursor.execute(
                     """
                     INSERT INTO processed_emails 
-                    (account_name, email_id, from_addr, to_addr, subject, date, category) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (account_name, email_id, from_addr, to_addr, subject, date, category, raw_message) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_name, 
@@ -281,7 +287,8 @@ class SQLiteStateManager:
                         email.to_addr[:255] if email.to_addr else None,
                         email.subject[:255] if email.subject else None,
                         email.date,
-                        category
+                        category,
+                        email.raw_message
                     )
                 )
             
@@ -466,6 +473,7 @@ class SQLiteStateManager:
                 for field in ['from_addr', 'to_addr', 'subject', 'date', 'category']:
                     if result.get(field) is None:
                         result[field] = ""
+                # Don't set default for raw_message - keep it as None if not present
                 results.append(result)
             
             conn.close()
