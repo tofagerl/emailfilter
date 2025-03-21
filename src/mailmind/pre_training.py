@@ -4,11 +4,14 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
+import time
+from datetime import datetime, timedelta
 
 from .models import Email, Category
 from .sqlite_state_manager import SQLiteStateManager
 from .email_processor import EmailProcessor
 from .categorizer import Categorizer
+from .imap_manager import IMAPManager
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +22,88 @@ class PreTrainingManager:
         self,
         state_manager: SQLiteStateManager,
         email_processor: EmailProcessor,
-        categorizer: Categorizer
+        categorizer: Categorizer,
+        imap_manager: IMAPManager
     ):
         self.state_manager = state_manager
         self.email_processor = email_processor
         self.categorizer = categorizer
+        self.imap_manager = imap_manager
+        
+    def monitor_category_changes(
+        self,
+        check_interval: int = 600,  # 10 minutes in seconds
+        lookback_days: int = 7  # How far back to check emails
+    ) -> None:
+        """
+        Monitor IMAP folders for category changes and update the database accordingly.
+        Runs continuously with the specified check interval.
+        
+        Args:
+            check_interval: Time between checks in seconds (default: 600)
+            lookback_days: Number of days to look back for email changes (default: 7)
+        """
+        while True:
+            try:
+                logger.info("Starting category change check")
+                self._check_category_changes(lookback_days)
+                logger.info(f"Category check complete. Sleeping for {check_interval} seconds")
+                time.sleep(check_interval)
+            except Exception as e:
+                logger.error(f"Error during category monitoring: {e}")
+                time.sleep(check_interval)  # Still sleep on error to prevent rapid retries
+                
+    def _check_category_changes(self, lookback_days: int) -> None:
+        """
+        Check for category changes in IMAP folders and update database.
+        
+        Args:
+            lookback_days: Number of days to look back for email changes
+        """
+        # Get all category folders from IMAP
+        categories = self.state_manager.get_all_categories()
+        since_date = datetime.now() - timedelta(days=lookback_days)
+        
+        for category in categories:
+            # Get emails from this category's folder
+            folder_emails = self.imap_manager.fetch_emails_from_folder(
+                category.folder_name,
+                since=since_date
+            )
+            
+            for msg_id, email_data in folder_emails.items():
+                # Check if this email exists in our database
+                existing_email = self.state_manager.get_email_by_message_id(msg_id)
+                
+                if existing_email:
+                    # Email exists - check if category changed
+                    if existing_email.category_id != category.id:
+                        logger.info(
+                            f"Category change detected for email {msg_id}: "
+                            f"from {existing_email.category.name if existing_email.category else 'None'} "
+                            f"to {category.name}"
+                        )
+                        # Update category in database
+                        self.state_manager.update_email_category(
+                            existing_email.id,
+                            category.id
+                        )
+                else:
+                    # Email doesn't exist - add it to database
+                    logger.info(f"New email {msg_id} found in category {category.name}")
+                    processed_content = self.email_processor.process_email_content(
+                        email_data.get('body', '')
+                    )
+                    
+                    self.state_manager.add_email(
+                        message_id=msg_id,
+                        subject=email_data.get('subject', ''),
+                        sender=email_data.get('from', ''),
+                        content=email_data.get('body', ''),
+                        processed_content=processed_content,
+                        category_id=category.id,
+                        received_date=email_data.get('date')
+                    )
         
     def prepare_training_data(
         self,

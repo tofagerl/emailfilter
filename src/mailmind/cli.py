@@ -57,7 +57,7 @@ def main():
     try:
         email_processor_main(config_path, daemon_mode=daemon_mode)
     except Exception as e:
-        logging.error(f"Error processing emails: {e}")
+        logging.error(f"Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
