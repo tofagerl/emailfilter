@@ -39,6 +39,10 @@ class ConfigManager:
             env_config = self._load_env_config()
             merged_config = self._merge_configs(yaml_config, env_config)
             
+            # Ensure OpenAI API key is present
+            if not merged_config.get("openai", {}).get("api_key"):
+                logger.warning("OpenAI API key not found in config or environment variables")
+            
             # Validate and convert to Pydantic model
             self.config = Config(**merged_config)
             
@@ -77,7 +81,7 @@ class ConfigManager:
             }
         }
         
-        # Remove None values
+        # Remove None values and convert types
         return self._clean_dict(env_config)
     
     def _merge_configs(self, yaml_config: Dict, env_config: Dict) -> Dict:
@@ -104,7 +108,7 @@ class ConfigManager:
         return merged
     
     def _clean_dict(self, d: Dict) -> Dict:
-        """Remove None values from dictionary.
+        """Clean a dictionary by removing None values and converting types.
         
         Args:
             d: Dictionary to clean
@@ -114,7 +118,24 @@ class ConfigManager:
         """
         if not isinstance(d, dict):
             return d
-        return {k: self._clean_dict(v) for k, v in d.items() if v is not None}
+        
+        result = {}
+        for k, v in d.items():
+            if isinstance(v, dict):
+                cleaned = self._clean_dict(v)
+                if cleaned:  # Only add non-empty dicts
+                    result[k] = cleaned
+            elif v is not None:
+                # Convert string values to appropriate types
+                if k in ["temperature", "test_size"]:
+                    result[k] = float(v)
+                elif k in ["max_tokens", "batch_size", "max_emails_per_run", "lookback_days", "min_samples_per_category", "idle_timeout", "reconnect_delay"]:
+                    result[k] = int(v)
+                elif k == "move_emails":
+                    result[k] = v.lower() == "true"
+                else:
+                    result[k] = v
+        return result
     
     def validate(self) -> None:
         """Validate the loaded configuration."""

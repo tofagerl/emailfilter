@@ -74,7 +74,10 @@ class EmailProcessor:
         
         # Initialize OpenAI client
         try:
-            categorizer.initialize_openai_client(api_key=self.config_manager.openai_api_key)
+            api_key = self.config_manager.openai_api_key
+            if not api_key:
+                raise ValueError("OpenAI API key not found in configuration")
+            categorizer.initialize_openai_client(api_key=api_key)
             logger.debug("OpenAI client initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing OpenAI client: {e}")
@@ -414,37 +417,17 @@ class EmailProcessor:
                             
                             if unprocessed_emails:
                                 logger.info(f"Found {len(unprocessed_emails)} unprocessed emails in {folder}")
-                                # Categorize emails
-                                categorized_emails = self.categorize_emails(
-                                    client,
-                                    unprocessed_emails,
-                                    account,
-                                    self.config_manager.options.batch_size
-                                )
-                                
-                                # Process categorized emails
-                                self.process_categorized_emails(
-                                    client,
-                                    categorized_emails,
-                                    account,
-                                    folder
-                                )
-                            else:
-                                logger.debug(f"No unprocessed emails found in {folder}")
+                                # Process unprocessed emails
+                                self._process_unprocessed_emails(client, unprocessed_emails, account, folder)
                             
-                            # Get the current message count before IDLE
-                            pre_idle_messages = client.search(['ALL'])
-                            pre_idle_count = len(pre_idle_messages)
-                            logger.debug(f"Current message count before IDLE: {pre_idle_count}")
+                            # Get initial message count
+                            pre_idle_count = len(client.search(['ALL']))
+                            logger.debug(f"Message count before IDLE: {pre_idle_count}")
                             
-                            # Now enter IDLE mode to wait for new emails
-                            logger.debug(f"Waiting for new emails in {folder}")
-                            
-                            # Set shorter IDLE timeout and handle reconnection
-                            idle_timeout = min(300, self.config_manager.options.idle_timeout)  # Max 5 minutes
-                            client.idle()
-                            
+                            # Start IDLE mode with a shorter timeout to check connection more frequently
+                            idle_timeout = min(self.config_manager.options.idle_timeout, 300)  # Max 5 minutes
                             try:
+                                client.idle()
                                 responses = client.idle_check(timeout=idle_timeout)
                             finally:
                                 try:
@@ -477,39 +460,27 @@ class EmailProcessor:
                                 logger.debug(f"New messages detected: {post_idle_count - pre_idle_count}")
                                 has_new_emails = True
                             
-                            # Process any new emails
                             if has_new_emails:
-                                emails = self.imap_manager.get_emails(
-                                    client, 
-                                    folder, 
+                                # Process new emails
+                                new_emails = self.imap_manager.get_emails(
+                                    client,
+                                    folder,
                                     self.config_manager.options.max_emails_per_run
                                 )
                                 
                                 # Filter out already processed emails
-                                unprocessed_emails = {}
-                                for msg_id, email_obj in emails.items():
+                                unprocessed_new = {}
+                                for msg_id, email_obj in new_emails.items():
                                     if not self.state_manager.is_email_processed(account.name, email_obj):
-                                        unprocessed_emails[msg_id] = email_obj
+                                        unprocessed_new[msg_id] = email_obj
                                 
-                                if unprocessed_emails:
-                                    logger.info(f"Found {len(unprocessed_emails)} unprocessed emails after IDLE")
-                                    # Categorize emails
-                                    categorized_emails = self.categorize_emails(
-                                        client,
-                                        unprocessed_emails,
-                                        account,
-                                        self.config_manager.options.batch_size
-                                    )
-                                    
-                                    # Process categorized emails
-                                    self.process_categorized_emails(
-                                        client,
-                                        categorized_emails,
-                                        account,
-                                        folder
-                                    )
-                                else:
-                                    logger.debug(f"No unprocessed emails found after IDLE")
+                                if unprocessed_new:
+                                    logger.info(f"Processing {len(unprocessed_new)} new emails in {folder}")
+                                    self._process_unprocessed_emails(client, unprocessed_new, account, folder)
+                            
+                            # Small delay between folder checks
+                            time.sleep(1)
+                            
                         except ConnectionError as e:
                             logger.error(f"Connection error in folder {folder}: {e}")
                             raise  # Re-raise to trigger reconnection
@@ -518,6 +489,10 @@ class EmailProcessor:
                             if not self.imap_manager._is_connection_alive(client):
                                 raise ConnectionError("Connection lost during folder processing")
                             time.sleep(60)  # Wait before retrying folder
+                
+                    # Small delay between account checks
+                    time.sleep(5)
+                    
                 except Exception as e:
                     logger.error(f"Error in monitoring loop for {account}: {e}")
                     time.sleep(reconnect_delay)
