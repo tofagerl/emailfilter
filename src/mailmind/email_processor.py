@@ -223,6 +223,7 @@ class EmailProcessor:
                 # Move to appropriate folder if configured
                 if self.config_manager.options.move_emails:
                     target_folder = account.get_folder_for_category(category_name)
+                    logger.debug(f"Email {msg_id}: Category={category_name}, Target={target_folder}, Current={current_folder}")
                     
                     if target_folder and (current_folder is None or target_folder != current_folder):
                         # Attempt to move the email
@@ -231,6 +232,8 @@ class EmailProcessor:
                         if not move_successful:
                             logger.warning(f"Failed to move email {msg_id} to {target_folder}, skipping database update")
                             continue
+                    else:
+                        logger.debug(f"Skipping move for {msg_id}: Target folder same as current or invalid")
                 
                 # Only mark as processed in the database if the move was successful
                 # or if we're not configured to move emails
@@ -241,9 +244,9 @@ class EmailProcessor:
                     # Update count for this category
                     category_counts[category_name.name if hasattr(category_name, 'name') else category_name] = category_counts.get(category_name.name if hasattr(category_name, 'name') else category_name, 0) + 1
                     
-                    logger.info(f"Email {msg_id} processed successfully and marked in database")
+                    logger.debug(f"Email {msg_id} processed and marked in database")
             except Exception as e:
-                logger.error(f"Error processing email {msg_id}: {e}")
+                logger.error(f"Error processing email {msg_id}: {e}", exc_info=True)
         
         return category_counts
     
