@@ -205,14 +205,14 @@ class EmailCategorizer:
         ]
         
         return (
-            r"You are an email categorization assistant. Your task is to categorize "
-            r"emails into one of the following categories:\n\n"
+            "You are an email categorization assistant. Your task is to categorize "
+            "emails into one of the following categories:\n\n"
             f"{'\n'.join(category_lines)}\n\n"
-            r"For each email, return a JSON object with the following fields:\n"
-            r"- category: The category name (must be one of the above)\n"
-            r"- confidence: A number between 0 and 100 indicating confidence\n"
-            r"- reasoning: A brief explanation of why this category was chosen\n\n"
-            r"Return one JSON object per line for batch processing."
+            "For each email, return a JSON object with the following fields:\n"
+            "- category: The category name (must be one of the above)\n"
+            "- confidence: A number between 0 and 100 indicating confidence\n"
+            "- reasoning: A brief explanation of why this category was chosen\n\n"
+            "Return one JSON object per line for batch processing."
         )
 
     def _prepare_category_info(self, categories: List[Category]) -> List[Dict[str, str]]:
