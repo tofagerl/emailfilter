@@ -2,7 +2,6 @@
 
 import yaml
 import logging
-import os
 from typing import Dict, List, Optional
 from pathlib import Path
 
@@ -10,6 +9,8 @@ from .models import (
     Config, EmailAccount, ProcessingOptions, Category,
     EmailAccountConfig, OpenAIConfig, ProcessingConfig, LoggingConfig
 )
+from .config_validator import ConfigValidator
+from .config_converter import ConfigConverter
 
 logger = logging.getLogger(__name__)
 
@@ -29,172 +30,38 @@ class ConfigManager:
         self._load_config()
     
     def _load_config(self) -> None:
-        """Load configuration from YAML file and environment variables."""
+        """Load configuration from YAML file."""
         try:
             # Load YAML config
             with open(self.config_path, "r") as f:
                 yaml_config = yaml.safe_load(f)
             
-            # Override with environment variables
-            env_config = self._load_env_config()
-            merged_config = self._merge_configs(yaml_config, env_config)
-            
-            # Ensure OpenAI API key is present
-            if not merged_config.get("openai", {}).get("api_key"):
-                logger.warning("OpenAI API key not found in config or environment variables")
-            
             # Validate and convert to Pydantic model
-            self.config = Config(**merged_config)
+            self.config = Config(**yaml_config)
+            ConfigValidator.validate(self.config)
             
             logger.debug("Configuration loaded successfully")
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
             raise
     
-    def _load_env_config(self) -> Dict:
-        """Load configuration from environment variables.
-        
-        Returns:
-            Dictionary of environment-based configuration
-        """
-        env_config = {
-            "openai": {
-                "api_key": os.environ.get("OPENAI_API_KEY"),
-                "model": os.environ.get("MAILMIND_OPENAI_MODEL"),
-                "temperature": os.environ.get("MAILMIND_OPENAI_TEMPERATURE"),
-                "max_tokens": os.environ.get("MAILMIND_OPENAI_MAX_TOKENS"),
-                "batch_size": os.environ.get("MAILMIND_OPENAI_BATCH_SIZE")
-            },
-            "processing": {
-                "move_emails": os.environ.get("MAILMIND_MOVE_EMAILS"),
-                "max_emails_per_run": os.environ.get("MAILMIND_MAX_EMAILS"),
-                "lookback_days": os.environ.get("MAILMIND_LOOKBACK_DAYS"),
-                "min_samples_per_category": os.environ.get("MAILMIND_MIN_SAMPLES"),
-                "test_size": os.environ.get("MAILMIND_TEST_SIZE"),
-                "idle_timeout": os.environ.get("MAILMIND_IDLE_TIMEOUT"),
-                "reconnect_delay": os.environ.get("MAILMIND_RECONNECT_DELAY")
-            },
-            "logging": {
-                "level": os.environ.get("MAILMIND_LOG_LEVEL"),
-                "file": os.environ.get("MAILMIND_LOG_FILE"),
-                "format": os.environ.get("MAILMIND_LOG_FORMAT")
-            }
-        }
-        
-        # Remove None values and convert types
-        return self._clean_dict(env_config)
-    
-    def _merge_configs(self, yaml_config: Dict, env_config: Dict) -> Dict:
-        """Merge YAML and environment configurations.
-        
-        Args:
-            yaml_config: Configuration from YAML file
-            env_config: Configuration from environment variables
-            
-        Returns:
-            Merged configuration dictionary
-        """
-        merged = yaml_config.copy()
-        
-        # Deep merge environment config
-        for section, values in env_config.items():
-            if section not in merged:
-                merged[section] = {}
-            if isinstance(values, dict):
-                merged[section].update(values)
-            else:
-                merged[section] = values
-        
-        return merged
-    
-    def _clean_dict(self, d: Dict) -> Dict:
-        """Clean a dictionary by removing None values and converting types.
-        
-        Args:
-            d: Dictionary to clean
-            
-        Returns:
-            Cleaned dictionary
-        """
-        if not isinstance(d, dict):
-            return d
-        
-        result = {}
-        for k, v in d.items():
-            if isinstance(v, dict):
-                cleaned = self._clean_dict(v)
-                if cleaned:  # Only add non-empty dicts
-                    result[k] = cleaned
-            elif v is not None:
-                # Convert string values to appropriate types
-                if k in ["temperature", "test_size"]:
-                    result[k] = float(v)
-                elif k in ["max_tokens", "batch_size", "max_emails_per_run", "lookback_days", "min_samples_per_category", "idle_timeout", "reconnect_delay"]:
-                    result[k] = int(v)
-                elif k == "move_emails":
-                    result[k] = v.lower() == "true"
-                else:
-                    result[k] = v
-        return result
-    
     def validate(self) -> None:
         """Validate the loaded configuration."""
-        if not self.config:
-            raise ValueError("Configuration not loaded")
-        
-        if not self.config.accounts:
-            raise ValueError("No email accounts configured")
-        
-        # Validate accounts
-        for account in self.config.accounts:
-            if not account.name or not account.email or not account.password or not account.imap_server:
-                raise ValueError(f"Invalid account configuration for {account}")
-            
-            # Validate categories
-            category_names = set()
-            for category in account.categories:
-                if not category.name:
-                    raise ValueError(f"Category name cannot be empty for account {account.name}")
-                if category.name.upper() in category_names:
-                    raise ValueError(f"Duplicate category name '{category.name}' for account {account.name}")
-                category_names.add(category.name.upper())
+        ConfigValidator.validate(self.config)
     
     @property
     def accounts(self) -> List[EmailAccount]:
         """Get list of email accounts."""
         if not self.config:
             return []
-        return [
-            EmailAccount(
-                name=acc.name,
-                email=acc.email,
-                password=acc.password,
-                imap_server=acc.imap_server,
-                imap_port=acc.imap_port,
-                ssl=acc.ssl,
-                folders=acc.folders,
-                categories=[
-                    Category(
-                        name=cat.name,
-                        description=cat.description,
-                        foldername=cat.foldername
-                    ) for cat in acc.categories
-                ]
-            ) for acc in self.config.accounts
-        ]
+        return [ConfigConverter.to_email_account(acc) for acc in self.config.accounts]
     
     @property
     def options(self) -> ProcessingOptions:
         """Get processing options."""
         if not self.config:
             return ProcessingOptions()
-        return ProcessingOptions(
-            max_emails_per_run=self.config.processing.max_emails_per_run,
-            batch_size=self.config.openai.batch_size,
-            idle_timeout=self.config.processing.idle_timeout,
-            move_emails=self.config.processing.move_emails,
-            model=self.config.openai.model
-        )
+        return ConfigConverter.to_processing_options(self.config.processing, self.config.openai)
     
     @property
     def openai_api_key(self) -> Optional[str]:

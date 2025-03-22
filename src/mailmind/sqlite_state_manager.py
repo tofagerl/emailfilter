@@ -11,6 +11,32 @@ from .models import Email, Category
 
 logger = logging.getLogger(__name__)
 
+def adapt_datetime(dt: datetime) -> str:
+    """Convert datetime to ISO format string for SQLite.
+    
+    Args:
+        dt: datetime object to convert
+        
+    Returns:
+        ISO format string
+    """
+    return dt.isoformat()
+
+def convert_datetime(s: bytes) -> datetime:
+    """Convert ISO format string from SQLite to datetime.
+    
+    Args:
+        s: ISO format string to convert
+        
+    Returns:
+        datetime object
+    """
+    return datetime.fromisoformat(s.decode())
+
+# Register the adapter and converter
+sqlite3.register_adapter(datetime, adapt_datetime)
+sqlite3.register_converter("timestamp", convert_datetime)
+
 class SQLiteStateManager:
     """Manages the state of processed emails using SQLite."""
     
@@ -36,7 +62,10 @@ class SQLiteStateManager:
             os.makedirs(os.path.dirname(self.db_file_path), exist_ok=True)
         else:
             # For in-memory database, create a persistent connection
-            self._persistent_connection = sqlite3.connect(self.db_file_path)
+            self._persistent_connection = sqlite3.connect(
+                self.db_file_path,
+                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+            )
             self._persistent_connection.row_factory = sqlite3.Row
         
         # Initialize database
@@ -68,7 +97,7 @@ class SQLiteStateManager:
                 folder TEXT,
                 category TEXT,
                 processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(account_name, hash_id)
+                UNIQUE(account_name, hash_id, category)
             )
             ''')
             
@@ -100,16 +129,15 @@ class SQLiteStateManager:
             folder_name: The IMAP folder name for this category
         """
         try:
-            conn = sqlite3.connect(self.db_file_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             cursor.execute(
-                "INSERT INTO categories (name, folder_name) VALUES (?, ?)",
+                "INSERT INTO categories (name, foldername) VALUES (?, ?)",
                 (name, folder_name)
             )
             
             conn.commit()
-            conn.close()
             
             logger.debug(f"Added category {name} with folder {folder_name}")
             
@@ -144,11 +172,14 @@ class SQLiteStateManager:
         if self.db_file_path == ':memory:':
             return self._persistent_connection
             
-        if self._connection_pool:
+        # Try to get a valid connection from the pool
+        while self._connection_pool:
             conn = self._connection_pool.pop()
-            if conn is None or not self._is_connection_valid(conn):
-                conn = self._create_connection()
-            return conn
+            if self._is_connection_valid(conn):
+                return conn
+            conn.close()  # Close invalid connection
+            
+        # Create new connection if pool is empty
         return self._create_connection()
     
     def _return_connection(self, conn: sqlite3.Connection) -> None:
@@ -157,17 +188,11 @@ class SQLiteStateManager:
         Args:
             conn: The connection to return
         """
-        if self.db_file_path == ':memory:':
+        if self.db_file_path == ':memory:' or conn is None:
             return
             
-        if conn is None:
-            return
-            
-        if len(self._connection_pool) < self._max_connections:
-            if self._is_connection_valid(conn):
-                self._connection_pool.append(conn)
-            else:
-                conn.close()
+        if len(self._connection_pool) < self._max_connections and self._is_connection_valid(conn):
+            self._connection_pool.append(conn)
         else:
             conn.close()
     
@@ -177,7 +202,10 @@ class SQLiteStateManager:
         Returns:
             A new SQLite connection
         """
-        conn = sqlite3.connect(self.db_file_path)
+        conn = sqlite3.connect(
+            self.db_file_path,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+        )
         conn.row_factory = sqlite3.Row
         return conn
     
@@ -249,17 +277,15 @@ class SQLiteStateManager:
             category: The category name or Category object
         """
         hash_id = self._generate_email_id(account_name, email)
-        
-        # Get category name if it's a Category object
         category_name = category.name if hasattr(category, 'name') else category
         
         def mark_email(conn):
             cursor = conn.cursor()
             
-            # Check if this email is already in the database
+            # Check if this email is already in the database with this category
             cursor.execute(
-                "SELECT id FROM processed_emails WHERE account_name = ? AND hash_id = ?",
-                (account_name, hash_id)
+                "SELECT id FROM processed_emails WHERE account_name = ? AND hash_id = ? AND category = ?",
+                (account_name, hash_id, category_name)
             )
             result = cursor.fetchone()
             
@@ -267,70 +293,67 @@ class SQLiteStateManager:
                 # Update existing record
                 cursor.execute(
                     """
-                    UPDATE processed_emails 
-                    SET category = ?, folder = ?, processed_date = CURRENT_TIMESTAMP
-                    WHERE account_name = ? AND hash_id = ?
+                    UPDATE processed_emails
+                    SET folder = ?, processed_date = CURRENT_TIMESTAMP
+                    WHERE account_name = ? AND hash_id = ? AND category = ?
                     """,
-                    (category_name, email.folder, account_name, hash_id)
+                    (email.folder, account_name, hash_id, category_name)
                 )
             else:
                 # Insert new record
                 cursor.execute(
                     """
                     INSERT INTO processed_emails (
-                        account_name, hash_id, message_id, from_addr, to_addr, subject, 
+                        account_name, hash_id, message_id, from_addr, to_addr, subject,
                         body, date, folder, category
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account_name, hash_id, email.message_id, email.from_addr, email.to_addr,
-                        email.subject, email.body, email.date.isoformat(), email.folder, category_name
+                        email.subject, email.body, email.date, email.folder, category_name
                     )
                 )
-            
-            logger.debug(f"Marked email {hash_id} as processed with category {category_name}")
         
         self._execute_with_connection(mark_email)
     
     def cleanup_old_entries(self, max_age_days: int = 30) -> None:
-        """Clean up old entries from the processed state.
+        """Clean up old processed email entries.
         
         Args:
-            max_age_days: Maximum age of entries in days
+            max_age_days: Maximum age in days for entries to keep
         """
         try:
-            conn = sqlite3.connect(self.db_file_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             # Calculate cutoff date
-            cutoff_date = datetime.now() - timedelta(days=max_age_days)
-            cutoff_str = cutoff_date.strftime("%Y-%m-%d %H:%M:%S")
+            cutoff_date = (datetime.now() - timedelta(days=max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
             
             # Delete old entries
             cursor.execute(
                 "DELETE FROM processed_emails WHERE processed_date < ?",
-                (cutoff_str,)
+                (cutoff_date,)
             )
             
-            deleted_count = cursor.rowcount
             conn.commit()
-            conn.close()
             
-            logger.info(f"Cleaned up {deleted_count} old entries from the database")
+            logger.debug(f"Cleaned up entries older than {cutoff_date}")
+            
         except Exception as e:
             logger.error(f"Error cleaning up old entries: {e}")
+            raise
     
     def get_processed_count(self, account_name: Optional[str] = None) -> int:
-        """Get the count of processed emails.
+        """Get count of processed emails.
         
         Args:
             account_name: Optional account name to filter by
             
         Returns:
-            The count of processed emails
+            Count of processed emails
         """
         try:
-            conn = sqlite3.connect(self.db_file_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             if account_name:
@@ -341,44 +364,40 @@ class SQLiteStateManager:
             else:
                 cursor.execute("SELECT COUNT(*) FROM processed_emails")
             
-            count = cursor.fetchone()[0]
-            conn.close()
+            return cursor.fetchone()[0]
             
-            return count
         except Exception as e:
             logger.error(f"Error getting processed count: {e}")
-            return 0
+            raise
     
     def get_accounts(self) -> List[str]:
-        """Get a list of all account names in the database.
+        """Get list of accounts with processed emails.
         
         Returns:
-            A list of account names
+            List of account names
         """
         try:
-            conn = sqlite3.connect(self.db_file_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             cursor.execute("SELECT DISTINCT account_name FROM processed_emails")
-            accounts = [row[0] for row in cursor.fetchall()]
+            return [row[0] for row in cursor.fetchall()]
             
-            conn.close()
-            return accounts
         except Exception as e:
             logger.error(f"Error getting accounts: {e}")
-            return []
+            raise
     
     def delete_account_entries(self, account_name: str) -> int:
-        """Delete all entries for a specific account.
+        """Delete all entries for an account.
         
         Args:
-            account_name: The account name to delete entries for
+            account_name: The account name
             
         Returns:
-            The number of entries deleted
+            Number of entries deleted
         """
         try:
-            conn = sqlite3.connect(self.db_file_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             cursor.execute(
@@ -386,15 +405,15 @@ class SQLiteStateManager:
                 (account_name,)
             )
             
-            deleted_count = cursor.rowcount
+            deleted = cursor.rowcount
             conn.commit()
-            conn.close()
             
-            logger.debug(f"Deleted {deleted_count} entries for account {account_name}")
-            return deleted_count
+            logger.debug(f"Deleted {deleted} entries for account {account_name}")
+            return deleted
+            
         except Exception as e:
-            logger.error(f"Error deleting entries for account {account_name}: {e}")
-            return 0
+            logger.error(f"Error deleting account entries: {e}")
+            raise
     
     def query_processed_emails(
         self, 
@@ -406,23 +425,22 @@ class SQLiteStateManager:
         limit: int = 100,
         offset: int = 0
     ) -> List[dict]:
-        """Query processed emails by various criteria.
+        """Query processed emails with filters.
         
         Args:
-            account_name: Filter by account name
-            from_addr: Filter by sender address (partial match)
-            to_addr: Filter by recipient address (partial match)
-            subject: Filter by subject (partial match)
-            category: Filter by category
-            limit: Maximum number of results to return
+            account_name: Optional account name filter
+            from_addr: Optional from address filter
+            to_addr: Optional to address filter
+            subject: Optional subject filter
+            category: Optional category filter
+            limit: Maximum number of results
             offset: Offset for pagination
             
         Returns:
-            List of dictionaries containing email information
+            List of email records
         """
         try:
-            conn = sqlite3.connect(self.db_file_path)
-            conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             # Build query
@@ -434,22 +452,21 @@ class SQLiteStateManager:
                 params.append(account_name)
             
             if from_addr:
-                query += " AND (from_addr LIKE ? OR from_addr IS NULL)"
+                query += " AND from_addr LIKE ?"
                 params.append(f"%{from_addr}%")
             
             if to_addr:
-                query += " AND (to_addr LIKE ? OR to_addr IS NULL)"
+                query += " AND to_addr LIKE ?"
                 params.append(f"%{to_addr}%")
             
             if subject:
-                query += " AND (subject LIKE ? OR subject IS NULL)"
+                query += " AND subject LIKE ?"
                 params.append(f"%{subject}%")
             
             if category:
-                query += " AND (category = ? OR category IS NULL)"
+                query += " AND category = ?"
                 params.append(category)
             
-            # Add order by, limit and offset
             query += " ORDER BY processed_date DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
             
@@ -457,21 +474,11 @@ class SQLiteStateManager:
             cursor.execute(query, params)
             
             # Convert rows to dictionaries
-            results = []
-            for row in cursor.fetchall():
-                result = dict(row)
-                # Ensure all fields have values (not NULL)
-                for field in ['from_addr', 'to_addr', 'subject', 'date', 'category']:
-                    if result.get(field) is None:
-                        result[field] = ""
-                # Don't set default for raw_message - keep it as None if not present
-                results.append(result)
+            return [dict(row) for row in cursor.fetchall()]
             
-            conn.close()
-            return results
         except Exception as e:
             logger.error(f"Error querying processed emails: {e}")
-            return []
+            raise
     
     def get_category_stats(self, account_name: Optional[str] = None) -> dict:
         """Get statistics about email categories.
@@ -482,54 +489,41 @@ class SQLiteStateManager:
         Returns:
             Dictionary mapping categories to counts
         """
-        try:
-            conn = sqlite3.connect(self.db_file_path)
+        query = """
+            SELECT category, COUNT(*) as count
+            FROM processed_emails
+            WHERE category IS NOT NULL
+            {}
+            GROUP BY category
+        """.format("AND account_name = ?" if account_name else "")
+        
+        def get_stats(conn):
             cursor = conn.cursor()
-            
-            if account_name:
-                cursor.execute(
-                    "SELECT COALESCE(category, 'UNKNOWN') as category, COUNT(*) FROM processed_emails WHERE account_name = ? GROUP BY category",
-                    (account_name,)
-                )
-            else:
-                cursor.execute(
-                    "SELECT COALESCE(category, 'UNKNOWN') as category, COUNT(*) FROM processed_emails GROUP BY category"
-                )
-            
-            stats = {}
-            for row in cursor.fetchall():
-                category, count = row
-                stats[category] = count
-            
-            conn.close()
-            return stats
+            cursor.execute(query, (account_name,) if account_name else ())
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        
+        try:
+            return self._execute_with_connection(get_stats)
         except Exception as e:
             logger.error(f"Error getting category stats: {e}")
-            return {}
-
+            raise
+    
     def get_all_categories(self) -> List[dict]:
-        """Get all categories from the database.
+        """Get all categories.
         
         Returns:
-            List of dictionaries containing category information
+            List of category records
         """
         try:
-            conn = sqlite3.connect(self.db_file_path)
-            conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+            conn = self._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute("SELECT * FROM categories ORDER BY name")
+            cursor.execute("SELECT * FROM categories")
+            return [dict(row) for row in cursor.fetchall()]
             
-            # Convert rows to dictionaries
-            categories = []
-            for row in cursor.fetchall():
-                categories.append(dict(row))
-            
-            conn.close()
-            return categories
         except Exception as e:
             logger.error(f"Error getting categories: {e}")
-            return []
+            raise
 
     def get_all_emails_with_categories(self) -> List[Tuple[Email, Category]]:
         """Get all processed emails with their categories.
