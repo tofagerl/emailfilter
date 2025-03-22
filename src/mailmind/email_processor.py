@@ -360,8 +360,15 @@ class EmailProcessor:
                 time.sleep(1)
         finally:
             running = False
+            # Force disconnect all IMAP connections
+            self.imap_manager.disconnect_all()
+            
+            # Wait for threads with timeout
+            shutdown_timeout = self.config_manager.options.shutdown_timeout
             for thread in threads:
-                thread.join(timeout=5)
+                thread.join(timeout=shutdown_timeout)
+                if thread.is_alive():
+                    logger.warning(f"Thread {thread.name} did not shut down gracefully within {shutdown_timeout} seconds")
     
     def _monitor_account(self, account: EmailAccount) -> None:
         """Monitor an email account continuously.

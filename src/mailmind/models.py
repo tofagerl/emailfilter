@@ -138,7 +138,8 @@ class ProcessingOptions:
     """Configuration options for email processing."""
     max_emails_per_run: int = 100
     batch_size: int = 10
-    idle_timeout: int = 1740  # 29 minutes
+    idle_timeout: int = 300  # 5 minutes
+    shutdown_timeout: int = 10  # 10 seconds for graceful shutdown
     move_emails: bool = True
     model: str = "gpt-4o-mini"  # Default to GPT-4o mini
     

@@ -251,6 +251,12 @@ class IMAPManager:
                 conn_info = self.connections[account_name]
                 client = conn_info['client']
                 
+                # Try to end any active IDLE sessions
+                try:
+                    client.idle_done()
+                except Exception:
+                    pass  # Ignore errors when ending IDLE
+                
                 # Only try to logout if the connection appears alive
                 if self._is_connection_alive(client):
                     try:
@@ -272,7 +278,9 @@ class IMAPManager:
     
     def disconnect_all(self) -> None:
         """Disconnect from all IMAP servers."""
-        for account_name in list(self.connections.keys()):
+        # Create a list of account names to avoid modifying dict during iteration
+        account_names = list(self.connections.keys())
+        for account_name in account_names:
             self.disconnect(account_name)
     
     def get_emails(self, client: IMAPClient, folder: str, max_emails: int = 0) -> Dict[int, Email]:
