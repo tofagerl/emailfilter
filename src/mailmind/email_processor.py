@@ -71,17 +71,6 @@ class EmailProcessor:
         # Memory management settings
         self.max_email_size = 50 * 1024 * 1024  # 50MB max email size
         self.max_batch_memory = 200 * 1024 * 1024  # 200MB max batch memory
-        
-        # Initialize OpenAI client
-        try:
-            api_key = self.config_manager.openai_api_key
-            if not api_key:
-                raise ValueError("OpenAI API key not found in configuration")
-            categorizer.initialize_openai_client(api_key=api_key)
-            logger.debug("OpenAI client initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing OpenAI client: {e}")
-            raise
     
     def _estimate_email_size(self, email: Email) -> int:
         """Estimate the memory size of an email.

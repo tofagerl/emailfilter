@@ -7,20 +7,6 @@ from email.message import Message
 from pydantic import BaseModel, Field, EmailStr, validator, field_validator
 
 @dataclass
-class Category:
-    """Represents an email category with its properties."""
-    name: str
-    description: str
-    foldername: str
-    
-    def __post_init__(self):
-        """Ensure name is uppercase after initialization."""
-        self.name = self.name.upper()
-    
-    def __str__(self) -> str:
-        return self.name
-
-@dataclass
 class Email:
     """Represents an email message with its metadata and content."""
     subject: str
@@ -84,6 +70,20 @@ class Email:
                 return ""
             except Exception:
                 return ""
+
+@dataclass
+class Category:
+    """Represents an email category with its properties."""
+    name: str
+    description: str
+    foldername: str
+    
+    def __post_init__(self):
+        """Ensure name is uppercase after initialization."""
+        self.name = self.name.upper()
+    
+    def __str__(self) -> str:
+        return self.name
 
 @dataclass
 class EmailAccount:

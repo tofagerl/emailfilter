@@ -7,9 +7,12 @@ import json
 import re
 from enum import Enum, auto
 from typing import Dict, List, Optional, Union, Any
+from dataclasses import dataclass, field
 
 import openai
 from openai import OpenAI
+from openai.types.chat import ChatCompletion
+from openai.types.chat.chat_completion import Choice, ChatCompletionMessage
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -23,13 +26,84 @@ logger.setLevel(logging.DEBUG)
 DEFAULT_CATEGORIES = ["SPAM", "RECEIPTS", "PROMOTIONS", "UPDATES", "INBOX"]
 
 
+class EmailCategory(Enum):
+    """Enum for email categories."""
+    SPAM = auto()
+    RECEIPTS = auto()
+    PROMOTIONS = auto()
+    UPDATES = auto()
+    INBOX = auto()
+    
+    def __str__(self) -> str:
+        return self.name.capitalize()
+
+
+@dataclass
+class Category:
+    """Represents an email category with its properties."""
+    name: str
+    description: str
+    foldername: str
+    
+    def __post_init__(self):
+        """Ensure name is uppercase after initialization."""
+        self.name = self.name.upper()
+    
+    def __str__(self) -> str:
+        return self.name
+
+
+@dataclass
+class EmailAccount:
+    """Represents an email account configuration."""
+    name: str
+    email: str
+    password: str
+    imap_server: str
+    imap_port: int = 993
+    ssl: bool = True
+    folders: List[str] = field(default_factory=list)
+    categories: List[Category] = field(default_factory=list)
+    
+    def __post_init__(self):
+        if self.folders is None:
+            self.folders = ["INBOX"]
+        
+        # Set default categories if none provided
+        if self.categories is None:
+            self.categories = [
+                Category("SPAM", "Unwanted or malicious emails", "[Spam]"),
+                Category("RECEIPTS", "Purchase confirmations and receipts", "[Receipts]"),
+                Category("PROMOTIONS", "Marketing and promotional emails", "[Promotions]"),
+                Category("UPDATES", "Updates and notifications", "[Updates]"),
+                Category("INBOX", "Important emails that need attention", "INBOX")
+            ]
+    
+    def __str__(self) -> str:
+        return f"{self.name} ({self.email})"
+    
+    def get_category_names(self) -> List[str]:
+        """Get list of category names for this account."""
+        return [category.name for category in self.categories]
+    
+    def get_category_by_name(self, name: str) -> Optional[Category]:
+        """Get a category by its name."""
+        name_upper = name.upper()
+        for category in self.categories:
+            if category.name.upper() == name_upper:
+                return category
+        return None
+    
+    def get_folder_for_category(self, category_name: str) -> str:
+        """Get the folder name for a given category."""
+        category = self.get_category_by_name(category_name)
+        if category:
+            return category.foldername
+        return "INBOX"  # Default to INBOX if category not found
+
+
 class CategorizationError(Exception):
     """Base exception for categorization errors."""
-    pass
-
-
-class APIError(CategorizationError):
-    """Error when calling the OpenAI API."""
     pass
 
 
@@ -71,95 +145,99 @@ class CategorizerConfig:
         self.presence_penalty = presence_penalty
 
 
-class Category:
-    """Represents an email category."""
-    
-    def __init__(self, name: str, description: str, folder_name: str = None):
-        """Initialize a category.
-        
-        Args:
-            name: The name of the category
-            description: A description of what emails belong in this category
-            folder_name: The name of the folder to move emails to (defaults to name)
-        """
-        self.name = name.upper()
-        self.description = description
-        self.folder_name = folder_name or name
-
-    def __str__(self) -> str:
-        """Return the category name as string representation."""
-        return self.name
-
-
 class EmailCategorizer:
-    """Categorizes emails using OpenAI API."""
-    
-    def __init__(
-        self,
-        api_key: str = None,
-        config_path: str = None,
-        config: CategorizerConfig = None
-    ):
-        """Initialize the email categorizer.
+    """Email categorization using OpenAI API."""
+
+    _global_categorizer = None
+
+    class APIError(Exception):
+        """Error when calling the OpenAI API."""
+        pass
+
+    def __init__(self, model: str = "gpt-4", categories: List[Category] = None, api_key: str = None, config_path: str = None, config_manager = None):
+        """Initialize the categorizer.
         
         Args:
-            api_key: The OpenAI API key (optional)
-            config_path: Path to a config file containing the API key (optional)
-            config: Configuration for the categorizer (optional)
-            
-        Raises:
-            ConfigurationError: If the API key cannot be found
+            model: The OpenAI model to use
+            categories: List of categories to use for categorization
+            api_key: Optional OpenAI API key
+            config_path: Optional path to config file
+            config_manager: Optional ConfigManager instance
         """
+        self.model = model
+        if config_manager:
+            self.categories = config_manager.accounts[0].categories if config_manager.accounts else []
+        else:
+            self.categories = categories or []
         self.client = None
-        self.config = config or CategorizerConfig()
-        self._initialize_client(api_key, config_path)
-    
-    def _initialize_client(self, api_key: str = None, config_path: str = None) -> None:
-        """Initialize the OpenAI client with an API key.
+        self.api_key = api_key
+        self.config_path = config_path
+        self.system_prompt = self._create_system_prompt(self.categories)
+        self._initialize_openai_client()
+
+    def _initialize_openai_client(self) -> None:
+        """Initialize the OpenAI client."""
+        if self.api_key:
+            logger.debug("OpenAI client initialized with provided API key")
+            self.client = OpenAI(api_key=self.api_key)
+        else:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                logger.debug("OpenAI client initialized with API key from environment variable")
+                self.client = OpenAI(api_key=api_key)
+            else:
+                logger.debug("OpenAI client initialized with default configuration")
+                self.client = OpenAI()
+
+    def _create_system_prompt(self, categories: List[Category]) -> str:
+        """Create the system prompt for the OpenAI API.
         
         Args:
-            api_key: The OpenAI API key (optional)
-            config_path: Path to a config file containing the API key (optional)
+            categories: List of Category objects
             
-        Raises:
-            ConfigurationError: If the API key cannot be found
+        Returns:
+            System prompt string
         """
-        # If API key is provided directly, use it
-        if api_key:
-            self.client = OpenAI(api_key=api_key)
-            logger.debug("OpenAI client initialized with provided API key")
-            return
+        category_info = self._prepare_category_info(categories)
+        category_lines = [
+            f"{cat['name']}: {cat['description']} (folder: {cat['folder']})"
+            for cat in category_info
+        ]
         
-        # If config path is provided, try to load the API key from it
-        if config_path:
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f)
-                
-                config_api_key = config.get("openai_api_key")
-                if not config_api_key:
-                    raise ConfigurationError("OpenAI API key not found in config file")
-                
-                self.client = OpenAI(api_key=config_api_key)
-                logger.debug("OpenAI client initialized with API key from config file")
-                return
-            except Exception as e:
-                logger.error(f"Error loading API key from config: {e}")
-                raise ConfigurationError(f"Error loading API key from config: {e}")
-        
-        # Try to get API key from environment variable
-        env_api_key = os.environ.get("OPENAI_API_KEY")
-        if env_api_key:
-            self.client = OpenAI(api_key=env_api_key)
-            logger.debug("OpenAI client initialized with API key from environment variable")
-            return
-        
-        # If we get here, we couldn't initialize the client
-        raise ConfigurationError(
-            "Could not initialize OpenAI client. Please provide an API key directly, "
-            "through a config file, or set the OPENAI_API_KEY environment variable."
+        return (
+            "You are an email categorization assistant. Your task is to categorize "
+            "emails into one of the following categories:\n\n"
+            f"{'\n'.join(category_lines)}\n\n"
+            "For each email, return a JSON object with the following fields:\n"
+            "- category: The category name (must be one of the above)\n"
+            "- confidence: A number between 0 and 100 indicating confidence\n"
+            "- reasoning: A brief explanation of why this category was chosen\n\n"
+            "Return one JSON object per line for batch processing."
         )
-    
+
+    def _prepare_category_info(self, categories: List[Category]) -> List[Dict[str, str]]:
+        """Prepare category information for the system prompt.
+        
+        Args:
+            categories: List of Category objects
+            
+        Returns:
+            List of dictionaries containing category information
+        """
+        if not categories:
+            categories = [
+                Category("INBOX", "Default inbox", "INBOX")
+            ]
+        
+        return [
+            {
+                "name": category.name,
+                "description": category.description,
+                "folder": category.foldername
+            }
+            for category in categories
+        ]
+
     def _log_interaction(
         self,
         email: Dict[str, str],
@@ -189,103 +267,70 @@ class EmailCategorizer:
         except Exception as e:
             logger.error(f"Error logging interaction: {e}")
     
-    def _prepare_category_info(self, categories: List[Category]) -> List[Dict[str, str]]:
-        """Extract category information.
-        
-        Args:
-            categories: List of Category objects
-            
-        Returns:
-            List of dictionaries with category information
-        """
-        category_info = []
-        for category in categories:
-            category_info.append({
-                "name": category.name,
-                "description": category.description,
-                "folder": getattr(category, "folder_name", category.name)
-            })
-        return category_info
-    
-    def _create_system_prompt(self, categories: List[Category]) -> str:
-        """Create the system prompt for the OpenAI API.
-        
-        Args:
-            categories: List of Category objects
-            
-        Returns:
-            System prompt string
-        """
-        category_info = self._prepare_category_info(categories)
-        category_names = [c.name for c in categories]
-        
-        return f"""You are an email categorization assistant. Your task is to categorize emails into one of the following categories:
-
-{json.dumps(category_info, indent=2)}
-
-For each email, respond with a JSON object containing:
-1. "category": The category name (must be one of: {', '.join(category_names)})
-2. "confidence": Your confidence level (0-100)
-3. "reasoning": Brief explanation of your categorization
-
-Analyze the email's subject, sender, and content to determine the most appropriate category.
-Use the category descriptions to guide your decision.
-"""
-    
     def _create_user_prompt(self, emails: List[Dict[str, str]], batch_size: int) -> str:
         """Create the user prompt for the OpenAI API.
         
         Args:
             emails: List of email dictionaries
-            batch_size: Maximum number of emails to include
+            batch_size: Number of emails to process
             
         Returns:
-            User prompt string
+            Formatted prompt string
         """
-        user_prompt = "Categorize the following emails:\n\n"
+        # Format each email for the prompt
+        email_prompts = []
         for i, email in enumerate(emails[:batch_size]):
-            user_prompt += f"Email {i+1}:\n"
-            user_prompt += f"From: {email.get('from', '')}\n"
-            user_prompt += f"To: {email.get('to', '')}\n"
-            user_prompt += f"Subject: {email.get('subject', '')}\n"
-            user_prompt += f"Date: {email.get('date', '')}\n"
-            user_prompt += f"Body: {email.get('body', '')[:1000]}...\n\n"
-        return user_prompt
+            email_prompt = (
+                f"Email {i+1}:\n"
+                f"From: {email.get('from', '')}\n"
+                f"To: {email.get('to', '')}\n"
+                f"Subject: {email.get('subject', '')}\n"
+                f"Body: {email.get('body', '')}\n"
+            )
+            email_prompts.append(email_prompt)
+
+        # Combine all email prompts
+        return "Categorize the following emails. Respond with one JSON object per line:\n\n" + "\n".join(email_prompts)
     
-    def _call_api(self, system_prompt: str, user_prompt: str) -> str:
-        """Call the OpenAI API with the given prompts.
+    def _call_api(self, prompt: str) -> str:
+        """Call the OpenAI API with the given prompt.
         
         Args:
-            system_prompt: The system prompt
-            user_prompt: The user prompt
+            prompt: The user prompt
             
         Returns:
-            The response text from OpenAI
+            API response text
             
         Raises:
-            APIError: If there's an error calling the API
+            APIError: If the API call fails
         """
         if not self.client:
-            raise APIError("OpenAI client not initialized")
-        
+            raise self.APIError("OpenAI client not initialized")
+
         try:
             response = self.client.chat.completions.create(
-                model=self.config.model,
+                model=self.model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
                 ],
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                top_p=self.config.top_p,
-                frequency_penalty=self.config.frequency_penalty,
-                presence_penalty=self.config.presence_penalty
+                temperature=0.7,
+                max_tokens=1000
             )
             
-            return response.choices[0].message.content
+            # Handle different response formats
+            if hasattr(response, 'choices') and response.choices:
+                if hasattr(response.choices[0], 'message') and hasattr(response.choices[0].message, 'content'):
+                    return response.choices[0].message.content
+                elif hasattr(response.choices[0], 'text'):
+                    return response.choices[0].text
+            elif hasattr(response, 'content'):
+                return response.content
+            
+            # If we get here, try to convert the response to a string
+            return str(response)
         except Exception as e:
-            logger.error(f"Error calling OpenAI API: {e}")
-            raise APIError(f"Error calling OpenAI API: {e}")
+            raise self.APIError(f"API error: {str(e)}")
     
     def _extract_json_objects(self, response_text: str) -> List[str]:
         """Extract JSON objects from a text response.
@@ -404,78 +449,169 @@ Use the category descriptions to guide your decision.
         
         return results
     
-    def categorize_emails(
-        self,
-        emails: List[Dict[str, str]],
-        categories: List[Category]
-    ) -> List[Dict[str, Any]]:
+    def categorize_emails(self, emails: List[Dict[str, str]], categories: List[Category] = None) -> List[Dict[str, Any]]:
         """Categorize a batch of emails.
         
         Args:
-            emails: List of email dictionaries
-            categories: List of Category objects
+            emails: List of email dictionaries with 'from', 'to', 'subject', and 'body' fields
+            categories: Optional list of categories to use (defaults to self.categories)
             
         Returns:
-            List of dictionaries with categorization results
+            List of dictionaries with category, confidence, and reasoning
         """
-        if not emails:
-            return []
-        
-        # Limit batch size to the number of emails
-        batch_size = min(self.config.batch_size, len(emails))
-        
+        if not self.client:
+            raise self.APIError("OpenAI client not initialized")
+
+        # Use provided categories or fall back to instance categories
+        categories = categories or self.categories
+        if not categories:
+            categories = [Category("INBOX", "Default inbox", "INBOX")]
+
+        # Create user prompt
+        user_prompt = self._create_user_prompt(emails, len(emails))
+
         try:
-            # Create prompts
-            system_prompt = self._create_system_prompt(categories)
-            user_prompt = self._create_user_prompt(emails, batch_size)
-            
             # Call OpenAI API
-            response_text = self._call_api(system_prompt, user_prompt)
-            
+            response_text = self._call_api(user_prompt)
+
             # Parse response
-            results = self._parse_response(response_text, categories, batch_size)
-            
-            # Log interaction for debugging with actual categories
-            for i, email in enumerate(emails[:batch_size]):
-                if i < len(results):
-                    category_result = results[i]["category"]
-                    self._log_interaction(
-                        email, 
-                        f"Batch categorization with {self.config.model} (email {i+1} of {batch_size})", 
-                        response_text, 
-                        category_result
+            json_objects = self._extract_json_objects(response_text)
+            if not json_objects:
+                # Return default results for all emails
+                inbox_category = next((c for c in categories if c.name == "INBOX"), categories[0])
+                return [{
+                    "category": inbox_category,
+                    "confidence": 0,
+                    "reasoning": "Failed to parse response"
+                }] * len(emails)
+
+            # Process results
+            results = []
+            for i, email in enumerate(emails):
+                try:
+                    if i >= len(json_objects):
+                        # Not enough results
+                        inbox_category = next((c for c in categories if c.name == "INBOX"), categories[0])
+                        results.append({
+                            "category": inbox_category,
+                            "confidence": 0,
+                            "reasoning": "No category result found"
+                        })
+                        continue
+
+                    # Parse the result
+                    result = json.loads(json_objects[i])
+                    category_name = result.get("category", "INBOX").upper()
+                    confidence = result.get("confidence", 0)
+                    reasoning = result.get("reasoning", "No reasoning provided")
+
+                    # Find matching category
+                    category = next(
+                        (c for c in categories if c.name == category_name),
+                        None
                     )
-            
+
+                    if category is None:
+                        # Invalid category, default to INBOX
+                        category = next((c for c in categories if c.name == "INBOX"), categories[0])
+                        confidence = 0
+                        reasoning = f"Invalid category: {category_name}, defaulting to INBOX"
+
+                    results.append({
+                        "category": category,
+                        "confidence": confidence,
+                        "reasoning": reasoning
+                    })
+
+                    # Log the result
+                    logger.info(
+                        f"Categorized: {email.get('from', 'unknown')} | "
+                        f"Subject: {email.get('subject', '')[:30]}... | "
+                        f"Category: {category.name}"
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error processing result for email {i}: {e}")
+                    inbox_category = next((c for c in categories if c.name == "INBOX"), categories[0])
+                    results.append({
+                        "category": inbox_category,
+                        "confidence": 0,
+                        "reasoning": f"Error processing result: {str(e)}"
+                    })
+
             return results
-        except APIError as e:
+
+        except self.APIError as e:
             logger.error(f"API error during categorization: {e}")
-            # Fallback: categorize all as inbox
-            inbox_category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
-            fallback_results = [{
-                "category": inbox_category,
-                "confidence": 0,
-                "reasoning": f"API error: {str(e)}"
-            }] * batch_size
-            
-            # Log the fallback categorization
-            for i, email in enumerate(emails[:batch_size]):
-                self._log_interaction(
-                    email,
-                    f"Batch categorization with {self.config.model} failed (email {i+1} of {batch_size})",
-                    f"Error: {str(e)}",
-                    "INBOX"
-                )
-            
-            return fallback_results
+            raise
         except Exception as e:
-            logger.error(f"Unexpected error during categorization: {e}")
-            # Return default categories for all emails
-            inbox_category = next((cat for cat in categories if cat.name == "INBOX"), categories[0])
-            return [{
-                "category": inbox_category,
-                "confidence": 0,
-                "reasoning": f"Error during categorization: {str(e)}"
-            } for _ in range(len(emails))]
+            logger.error(f"Error during categorization: {e}")
+            raise self.APIError(f"Error during categorization: {e}")
+
+    @classmethod
+    def initialize_openai_client(cls, api_key: str = None, config_path: str = None) -> 'EmailCategorizer':
+        """Initialize the OpenAI client.
+        
+        Args:
+            api_key: Optional OpenAI API key
+            config_path: Optional path to config file
+            
+        Returns:
+            EmailCategorizer instance
+        """
+        if cls._global_categorizer is None:
+            # If config_path is provided, try to load API key from config file
+            if config_path and not api_key:
+                try:
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+                        api_key = config.get('openai_api_key')
+                except Exception as e:
+                    logger.error(f"Failed to load config file: {e}")
+
+            cls._global_categorizer = cls(api_key=api_key, config_path=config_path)
+        return cls._global_categorizer
+
+    @classmethod
+    def batch_categorize_emails_for_account(cls, emails: List[Dict[str, str]], account: EmailAccount, batch_size: int = 5, model: str = "gpt-4") -> List[Dict[str, Any]]:
+        """Categorize a batch of emails for an account.
+        
+        Args:
+            emails: List of email dictionaries
+            account: Email account with category configuration
+            batch_size: Number of emails to process in each batch
+            model: OpenAI model to use
+            
+        Returns:
+            List of dictionaries with category, confidence, and reasoning
+        """
+        results = []
+        categorizer = cls(model=model, categories=account.categories)
+
+        # Process emails in batches
+        for i in range(0, len(emails), batch_size):
+            batch = emails[i:i + batch_size]
+            try:
+                batch_results = categorizer.categorize_emails(batch, account.categories)
+                results.extend(batch_results)
+            except cls.APIError as e:
+                # Handle API errors by defaulting to INBOX with error message
+                for _ in batch:
+                    results.append({
+                        "category": next((c for c in account.categories if c.name == "INBOX"), account.categories[0]),
+                        "confidence": 0,
+                        "reasoning": f"API error: {str(e)}"
+                    })
+            except Exception as e:
+                # Handle other errors by defaulting to INBOX with error message
+                for _ in batch:
+                    results.append({
+                        "category": next((c for c in account.categories if c.name == "INBOX"), account.categories[0]),
+                        "confidence": 0,
+                        "reasoning": f"Error: {str(e)}"
+                    })
+
+        return results
 
 
 # For backward compatibility with existing code
@@ -521,72 +657,59 @@ def initialize_openai_client(api_key=None, config_path=None):
     New code should use the EmailCategorizer class directly.
     """
     global _global_categorizer
-    _global_categorizer = EmailCategorizer(api_key=api_key, config_path=config_path)
+    
+    # If config_path is provided, try to load API key from config file
+    if config_path:
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+                api_key = config.get('openai_api_key')
+        except Exception as e:
+            logger.error(f"Failed to load config file: {e}")
+    
+    _global_categorizer = EmailCategorizer(api_key=api_key)
     return _global_categorizer
 
 
-def batch_categorize_emails_for_account(emails, account, batch_size=10, model="gpt-4o-mini"):
+def batch_categorize_emails_for_account(emails: List[Dict[str, str]], account: EmailAccount, batch_size: int = 5, model: str = "gpt-4") -> List[Dict[str, Any]]:
     """Categorize a batch of emails for an account.
     
     Args:
-        emails: List of Email objects
-        account: The email account with category definitions
-        batch_size: Maximum number of emails to process in one batch
-        model: The OpenAI model to use
+        emails: List of email dictionaries
+        account: Email account with category configuration
+        batch_size: Number of emails to process in each batch
+        model: OpenAI model to use
         
     Returns:
-        List of dictionaries with category information
+        List of dictionaries with category, confidence, and reasoning
     """
-    try:
-        # Convert Email objects to dictionaries and check for pre-defined categories
-        email_dicts = []
-        results = []
-        for email in emails:
-            if isinstance(email, dict):
-                email_dicts.append(email)
-                results.append(None)  # Placeholder for later categorization
-            else:
-                email_dict = {
-                    'from': email.from_addr,
-                    'to': email.to_addr,
-                    'subject': email.subject,
-                    'date': email.date,
-                    'body': email.body
-                }
-                email_dicts.append(email_dict)
-                results.append(None)  # Placeholder for later categorization
-        
-        # Create categorizer config
-        config = CategorizerConfig(model=model, batch_size=batch_size)
-        
-        # Create categorizer instance
-        categorizer = EmailCategorizer(config=config)
-        
-        # Get categories from account
-        categories = [Category(c.name, c.description, c.foldername) for c in account.categories]
-        
-        # Only categorize emails that don't have pre-defined categories
-        uncategorized_emails = [email for i, email in enumerate(email_dicts) if results[i] is None]
-        if uncategorized_emails:
-            api_results = categorizer.categorize_emails(uncategorized_emails, categories)
-            
-            # Merge results
-            j = 0
-            for i in range(len(results)):
-                if results[i] is None:
-                    results[i] = api_results[j]
-                    j += 1
-        
-        return results
-    except Exception as e:
-        logger.error(f"Unexpected error during categorization: {e}")
-        # Return default categories for all emails
-        inbox_category = next((cat for cat in account.categories if cat.name == "INBOX"), account.categories[0])
-        return [{
-            "category": Category(inbox_category.name, inbox_category.description, inbox_category.foldername),
-            "confidence": 0,
-            "reasoning": f"Error during categorization: {str(e)}"
-        } for _ in range(len(emails))]
+    results = []
+    categorizer = EmailCategorizer(model=model, categories=account.categories)
+
+    # Process emails in batches
+    for i in range(0, len(emails), batch_size):
+        batch = emails[i:i + batch_size]
+        try:
+            batch_results = categorizer.categorize_emails(batch, account.categories)
+            results.extend(batch_results)
+        except self.APIError as e:
+            # Handle API errors by defaulting to INBOX with error message
+            for _ in batch:
+                results.append({
+                    "category": next((c for c in account.categories if c.name == "INBOX"), account.categories[0]),
+                    "confidence": 0,
+                    "reasoning": f"API error: {str(e)}"
+                })
+        except Exception as e:
+            # Handle other errors by defaulting to INBOX with error message
+            for _ in batch:
+                results.append({
+                    "category": next((c for c in account.categories if c.name == "INBOX"), account.categories[0]),
+                    "confidence": 0,
+                    "reasoning": f"Error: {str(e)}"
+                })
+
+    return results
 
 
 # Initialize global categorizer for backward compatibility

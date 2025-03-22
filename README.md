@@ -116,7 +116,7 @@ filtered = filter.filter_emails(emails, {"from": "example.com"})
 
 ```python
 from mailmind import categorizer
-from mailmind.models import EmailAccount, EmailCategory
+from mailmind.categorizer import EmailAccount, EmailCategory
 
 # Initialize the OpenAI client
 categorizer.initialize_openai_client(api_key="your_openai_api_key")
@@ -411,7 +411,7 @@ category = categorizer.categorize_email(email)
 
 # New code
 from mailmind import categorizer
-from mailmind.models import EmailAccount, EmailCategory
+from mailmind.categorizer import EmailAccount, EmailCategory
 
 # Initialize the client
 categorizer.initialize_openai_client(config_path="config.yaml")

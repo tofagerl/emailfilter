@@ -7,9 +7,8 @@ import logging
 from dotenv import load_dotenv
 
 from mailmind.categorizer import (
-    initialize_openai_client, batch_categorize_emails_for_account
+    initialize_openai_client, batch_categorize_emails_for_account, Category, EmailAccount
 )
-from mailmind.models import EmailAccount, Category
 
 # Configure logging
 logging.basicConfig(

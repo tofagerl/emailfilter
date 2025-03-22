@@ -2,7 +2,7 @@ import pytest
 import os
 import json
 from unittest import mock
-from mailmind.models import EmailAccount
+from mailmind.categorizer import EmailAccount
 from mailmind.config import ConfigManager
 from mailmind.imap_manager import IMAPManager
 from mailmind.sqlite_state_manager import SQLiteStateManager
@@ -22,8 +22,19 @@ def test_account():
         'categories': ['WORK', 'PERSONAL', 'SHOPPING', 'TRAVEL']
     }
 
-def test_email_categorization_flow(mock_config, mock_imap):
+@mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"})
+@mock.patch("mailmind.categorizer.OpenAI")
+def test_email_categorization_flow(mock_openai, mock_config, mock_imap):
     """Test the complete email categorization flow."""
+    # Mock OpenAI response
+    mock_client = mock.MagicMock()
+    mock_response = mock.MagicMock()
+    mock_response.choices = [mock.MagicMock()]
+    mock_response.choices[0].message = mock.MagicMock()
+    mock_response.choices[0].message.content = '{"category": "WORK", "confidence": 95, "reasoning": "Work related email"}'
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_openai.return_value = mock_client
+
     config_manager = ConfigManager(mock_config)
     account = config_manager.accounts[0]
     
@@ -100,8 +111,19 @@ def test_category_distribution(mock_openai, mock_config, mock_imap):
     non_empty_categories = sum(1 for count in categories.values() if count > 0)
     assert non_empty_categories >= 2  # At least 2 categories should have emails
 
-def test_training_data_preparation(mock_config, mock_imap):
+@mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"})
+@mock.patch("mailmind.categorizer.OpenAI")
+def test_training_data_preparation(mock_openai, mock_config, mock_imap):
     """Test preparation of training data."""
+    # Mock OpenAI response
+    mock_client = mock.MagicMock()
+    mock_response = mock.MagicMock()
+    mock_response.choices = [mock.MagicMock()]
+    mock_response.choices[0].message = mock.MagicMock()
+    mock_response.choices[0].message.content = '{"category": "WORK", "confidence": 95, "reasoning": "Work related email"}'
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_openai.return_value = mock_client
+
     config_manager = ConfigManager(mock_config)
     account = config_manager.accounts[0]
     
@@ -117,6 +139,12 @@ def test_training_data_preparation(mock_config, mock_imap):
     # Process emails
     pre_training = PreTrainingManager(state_manager, email_processor, categorizer, imap_manager)
     train_df, test_df = pre_training.prepare_training_data()
+    
+    # Verify dataframes were created
+    assert train_df is not None
+    assert test_df is not None
+    assert len(train_df) > 0
+    assert len(test_df) > 0
     
     # Verify training data
     processed_emails = state_manager.get_all_emails_with_categories()

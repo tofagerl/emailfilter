@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 import email.message
 from email.mime.text import MIMEText
 import openai
-from mailmind.models import Category, Email
+from mailmind.categorizer import Category
+from mailmind.models import Email
 from mailmind.sqlite_state_manager import SQLiteStateManager
 import sqlite3
 import tempfile

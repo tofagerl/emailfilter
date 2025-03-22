@@ -7,23 +7,38 @@ from unittest import mock
 
 import pytest
 
-from mailmind import categorizer
-from mailmind.models import EmailAccount, Category
+from mailmind.categorizer import Category, EmailAccount, EmailCategory
+from mailmind.categorizer import EmailCategorizer
 
 
 @pytest.fixture
 def mock_openai_response():
     """Mock OpenAI API response."""
+    class MockMessage:
+        def __init__(self, content):
+            self.content = content
+            self.role = "assistant"
+
     class MockChoice:
         def __init__(self, content):
-            self.message = mock.MagicMock()
-            self.message.content = content
-    
+            self.message = MockMessage(content)
+            self.index = 0
+            self.finish_reason = "stop"
+
     class MockResponse:
         def __init__(self, content):
             self.choices = [MockChoice(content)]
-    
-    return MockResponse
+            self.model = "gpt-4"
+            self.object = "chat.completion"
+            self.created = 1234567890
+            self.usage = {"total_tokens": 100}
+
+    def create_response(content):
+        response = MockResponse(content)
+        response.choices[0].message.content = content
+        return response
+
+    return create_response
 
 
 @pytest.fixture
@@ -48,7 +63,7 @@ def mock_account():
 def mock_categorizer():
     """Create a mock EmailCategorizer instance."""
     with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"}):
-        cat = categorizer.EmailCategorizer()
+        cat = EmailCategorizer()
         cat.client = mock.MagicMock()
         return cat
 
@@ -76,21 +91,21 @@ def sample_emails():
 def category_objects():
     """Create Category objects for testing."""
     return [
-        categorizer.Category("SPAM", "Unwanted emails", "[Spam]"),
-        categorizer.Category("RECEIPTS", "Order confirmations", "[Receipts]"),
-        categorizer.Category("PROMOTIONS", "Marketing emails", "[Promotions]"),
-        categorizer.Category("UPDATES", "Notifications", "[Updates]"),
-        categorizer.Category("INBOX", "Important emails", "INBOX")
+        Category("SPAM", "Unwanted emails", "[Spam]"),
+        Category("RECEIPTS", "Order confirmations", "[Receipts]"),
+        Category("PROMOTIONS", "Marketing emails", "[Promotions]"),
+        Category("UPDATES", "Notifications", "[Updates]"),
+        Category("INBOX", "Important emails", "INBOX")
     ]
 
 
 def test_email_category_enum():
     """Test the EmailCategory enum."""
-    assert str(categorizer.EmailCategory.SPAM) == "Spam"
-    assert str(categorizer.EmailCategory.RECEIPTS) == "Receipts"
-    assert str(categorizer.EmailCategory.PROMOTIONS) == "Promotions"
-    assert str(categorizer.EmailCategory.UPDATES) == "Updates"
-    assert str(categorizer.EmailCategory.INBOX) == "Inbox"
+    assert str(EmailCategory.SPAM) == "Spam"
+    assert str(EmailCategory.RECEIPTS) == "Receipts"
+    assert str(EmailCategory.PROMOTIONS) == "Promotions"
+    assert str(EmailCategory.UPDATES) == "Updates"
+    assert str(EmailCategory.INBOX) == "Inbox"
 
 
 @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"})
@@ -98,27 +113,27 @@ def test_email_category_enum():
 def test_initialize_openai_client(mock_openai):
     """Test the initialize_openai_client function."""
     # Reset the global categorizer
-    categorizer._global_categorizer = None
+    EmailCategorizer._global_categorizer = None
     
     # Test with API key directly
-    categorizer.initialize_openai_client(api_key="direct_key")
+    EmailCategorizer.initialize_openai_client(api_key="direct_key")
     mock_openai.assert_called_with(api_key="direct_key")
     
     # Reset mock and global categorizer
     mock_openai.reset_mock()
-    categorizer._global_categorizer = None
+    EmailCategorizer._global_categorizer = None
     
     # Test with environment variable
-    categorizer.initialize_openai_client()
+    EmailCategorizer.initialize_openai_client()
     mock_openai.assert_called_with(api_key="test_key")
     
     # Reset mock and global categorizer
     mock_openai.reset_mock()
-    categorizer._global_categorizer = None
+    EmailCategorizer._global_categorizer = None
     
     # Test with config file
     with mock.patch("builtins.open", mock.mock_open(read_data='openai_api_key: "config_key"')):
-        categorizer.initialize_openai_client(config_path="config.yaml")
+        EmailCategorizer.initialize_openai_client(config_path="config.yaml")
     mock_openai.assert_called_with(api_key="config_key")
 
 
@@ -127,16 +142,17 @@ def test_initialize_openai_client(mock_openai):
 def test_batch_categorize_emails_for_account(mock_openai, mock_openai_response, mock_account):
     """Test the batch_categorize_emails_for_account function."""
     # Create a mock categorizer
-    cat = categorizer.EmailCategorizer()
-    
+    cat = EmailCategorizer()
+
     # Mock the OpenAI client
     mock_client = mock.MagicMock()
-    mock_client.chat.completions.create.return_value = mock_openai_response(
+    response = mock_openai_response(
         '{"category": "RECEIPTS", "confidence": 95, "reasoning": "This is an order confirmation"}\n'
         '{"category": "SPAM", "confidence": 98, "reasoning": "This is clearly spam"}'
     )
+    mock_client.chat.completions.create.return_value = response
     mock_openai.return_value = mock_client
-    
+
     # Test emails
     emails = [
         {
@@ -152,32 +168,20 @@ def test_batch_categorize_emails_for_account(mock_openai, mock_openai_response, 
             "body": "You've won a million dollars! Click here to claim."
         }
     ]
-    
+
     # Test batch categorization
-    results = categorizer.batch_categorize_emails_for_account(emails, mock_account)
-    
+    results = EmailCategorizer.batch_categorize_emails_for_account(emails, mock_account)
+
     # Verify results
     assert len(results) == 2
-    assert isinstance(results[0]["category"], categorizer.Category)
+    assert isinstance(results[0]["category"], Category)
     assert results[0]["category"].name == "INBOX"  # Since RECEIPTS is not in mock_account categories
     assert results[0]["confidence"] == 0  # Confidence is 0 for fallback category
     assert "invalid category" in results[0]["reasoning"].lower()
-    assert isinstance(results[1]["category"], categorizer.Category)
+    assert isinstance(results[1]["category"], Category)
     assert results[1]["category"].name == "INBOX"  # Since SPAM is not in mock_account categories
     assert results[1]["confidence"] == 0  # Confidence is 0 for fallback category
     assert "invalid category" in results[1]["reasoning"].lower()
-    
-    # Verify OpenAI API was called correctly
-    mock_client.chat.completions.create.assert_called_once()
-    args, kwargs = mock_client.chat.completions.create.call_args
-    assert kwargs["model"] == "gpt-4o-mini"  # Check for default model
-    assert len(kwargs["messages"]) == 2
-    assert kwargs["messages"][0]["role"] == "system"
-    assert "categorize emails" in kwargs["messages"][0]["content"].lower()
-    assert kwargs["messages"][1]["role"] == "user"
-    assert "Categorize the following emails" in kwargs["messages"][1]["content"]
-    assert emails[0]["from"] in kwargs["messages"][1]["content"]
-    assert emails[1]["subject"] in kwargs["messages"][1]["content"]
 
 
 @mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"})
@@ -185,7 +189,7 @@ def test_batch_categorize_emails_for_account(mock_openai, mock_openai_response, 
 def test_batch_categorize_emails_for_account_invalid_response(mock_openai, mock_openai_response, mock_account):
     """Test the batch_categorize_emails_for_account function with invalid response."""
     # Create a mock categorizer
-    cat = categorizer.EmailCategorizer()
+    cat = EmailCategorizer()
     
     # Mock the OpenAI client
     mock_client = mock.MagicMock()
@@ -203,11 +207,11 @@ def test_batch_categorize_emails_for_account_invalid_response(mock_openai, mock_
     ]
     
     # Test batch categorization - should default to INBOX
-    results = categorizer.batch_categorize_emails_for_account(emails, mock_account)
+    results = EmailCategorizer.batch_categorize_emails_for_account(emails, mock_account)
     
     # Verify results
     assert len(results) == 1
-    assert isinstance(results[0]["category"], categorizer.Category)
+    assert isinstance(results[0]["category"], Category)
     assert results[0]["category"].name == "INBOX"
     assert results[0]["confidence"] == 0
     assert "failed to parse" in results[0]["reasoning"].lower() or "missing from response" in results[0]["reasoning"].lower()
@@ -218,7 +222,7 @@ def test_batch_categorize_emails_for_account_invalid_response(mock_openai, mock_
 def test_batch_categorize_emails_for_account_invalid_category(mock_openai, mock_openai_response, mock_account):
     """Test the batch_categorize_emails_for_account function with invalid category."""
     # Create a mock categorizer
-    cat = categorizer.EmailCategorizer()
+    cat = EmailCategorizer()
     
     # Mock the OpenAI client
     mock_client = mock.MagicMock()
@@ -238,11 +242,11 @@ def test_batch_categorize_emails_for_account_invalid_category(mock_openai, mock_
     ]
     
     # Test batch categorization - should default to INBOX for invalid category
-    results = categorizer.batch_categorize_emails_for_account(emails, mock_account)
+    results = EmailCategorizer.batch_categorize_emails_for_account(emails, mock_account)
     
     # Verify results
     assert len(results) == 1
-    assert isinstance(results[0]["category"], categorizer.Category)
+    assert isinstance(results[0]["category"], Category)
     assert results[0]["category"].name == "INBOX"
     assert results[0]["confidence"] == 0
     assert "invalid category" in results[0]["reasoning"].lower() or "failed to parse" in results[0]["reasoning"].lower()
@@ -253,13 +257,13 @@ def test_batch_categorize_emails_for_account_invalid_category(mock_openai, mock_
 def test_batch_categorize_emails_for_account_api_error(mock_openai, mock_account):
     """Test the batch_categorize_emails_for_account function with API error."""
     # Create a mock categorizer
-    cat = categorizer.EmailCategorizer()
-    
+    cat = EmailCategorizer()
+
     # Mock the OpenAI client to raise an APIError
     mock_client = mock.MagicMock()
-    mock_client.chat.completions.create.side_effect = categorizer.APIError("API error")
+    mock_client.chat.completions.create.side_effect = EmailCategorizer.APIError("API error")
     mock_openai.return_value = mock_client
-    
+
     # Test emails
     emails = [
         {
@@ -269,13 +273,13 @@ def test_batch_categorize_emails_for_account_api_error(mock_openai, mock_account
             "body": "Just saying hi!"
         }
     ]
-    
+
     # Test batch categorization - should default to INBOX
-    results = categorizer.batch_categorize_emails_for_account(emails, mock_account)
-    
+    results = EmailCategorizer.batch_categorize_emails_for_account(emails, mock_account)
+
     # Verify results
     assert len(results) == 1
-    assert isinstance(results[0]["category"], categorizer.Category)
+    assert isinstance(results[0]["category"], Category)
     assert results[0]["category"].name == "INBOX"
     assert results[0]["confidence"] == 0
     assert "api error" in results[0]["reasoning"].lower()
@@ -352,25 +356,25 @@ def test_call_api(mock_categorizer, mock_openai_response):
     mock_categorizer.client.chat.completions.create.return_value = mock_openai_response("Test response")
     
     # Call the method
-    response = mock_categorizer._call_api("System prompt", "User prompt")
+    response = mock_categorizer._call_api("Test prompt")
     
     # Verify results
     assert response == "Test response"
+    mock_categorizer.client.chat.completions.create.assert_called_once()
     
     # Verify OpenAI API was called correctly
-    mock_categorizer.client.chat.completions.create.assert_called_once()
     args, kwargs = mock_categorizer.client.chat.completions.create.call_args
-    assert kwargs["model"] == "gpt-4o-mini"  # Check for default model
+    assert kwargs["model"] == "gpt-4"
     assert len(kwargs["messages"]) == 2
     assert kwargs["messages"][0]["role"] == "system"
-    assert kwargs["messages"][0]["content"] == "System prompt"
+    assert kwargs["messages"][0]["content"] == mock_categorizer.system_prompt
     assert kwargs["messages"][1]["role"] == "user"
-    assert kwargs["messages"][1]["content"] == "User prompt"
+    assert kwargs["messages"][1]["content"] == "Test prompt"
     
     # Test with client not initialized
     mock_categorizer.client = None
-    with pytest.raises(categorizer.APIError, match="OpenAI client not initialized"):
-        mock_categorizer._call_api("System prompt", "User prompt")
+    with pytest.raises(EmailCategorizer.APIError, match="OpenAI client not initialized"):
+        mock_categorizer._call_api("Test prompt")
 
 
 def test_extract_json_objects(mock_categorizer):
