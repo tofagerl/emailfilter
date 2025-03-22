@@ -66,9 +66,10 @@ Key overrides:
 - Clean state: python -m emailfilter.cli state clean
 - Reset state: python -m emailfilter.cli state reset 
 
-## Integration Tests
-- Located in tests/test_integration.py
-- Uses pytest framework
+## Tests
+All tests use pytest framework and are located in tests/
+
+### Integration Tests (test_integration.py)
 - Tests cover:
   - Email categorization flow
   - Category distribution
@@ -76,4 +77,34 @@ Key overrides:
 - Run with: pytest tests/test_integration.py
 - Requires test config in tests/integration/test_config.yaml
 - Uses mock IMAP server for testing
-- Mocks OpenAI API calls to avoid real API usage 
+- Mocks OpenAI API calls to avoid real API usage
+
+### Categorizer Tests (test_categorizer.py)
+- Tests cover:
+  - Email category enumeration
+  - OpenAI client initialization
+  - Batch email categorization
+  - Category info preparation
+  - System and user prompt creation
+  - API calls and response parsing
+  - Category validation
+  - JSON object extraction
+
+### Filter Tests (test_filter.py)
+- Tests cover:
+  - Email filtering functionality
+
+### Logging Tests (test_logging.py)
+- Tests cover:
+  - Logging configuration and functionality
+
+### Local State Tests (test_local_state.py)
+- Tests cover:
+  - Local state management
+  - Database operations
+  - State tracking
+
+### Test Configuration (conftest.py)
+- Contains shared test fixtures and configuration
+- Sets up mock servers and test data
+- Configures test environment 
