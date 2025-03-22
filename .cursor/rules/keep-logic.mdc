@@ -1,0 +1,7 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+When refactoring, keep the existing functionality intact as far as possible. 
+Try to avoid changing production code when writing or changing test code.
