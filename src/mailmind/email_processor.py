@@ -176,7 +176,8 @@ class EmailProcessor:
                 for j, msg_id in enumerate(batch_emails.keys()):
                     if j < len(results):
                         result = results[j]
-                        category_name = result.get("category", "INBOX")
+                        category = result.get("category", "INBOX")
+                        category_name = category.name if hasattr(category, 'name') else category
                         categorized_emails[msg_id] = (emails[msg_id], category_name)
                     else:
                         categorized_emails[msg_id] = (emails[msg_id], "INBOX")
@@ -235,10 +236,10 @@ class EmailProcessor:
                 # or if we're not configured to move emails
                 if move_successful:
                     # Mark as processed in local state with category information
-                    self.state_manager.mark_email_as_processed(account.name, email_obj, category_name)
+                    self.state_manager.mark_email_as_processed(account.name, email_obj, category_name.name if hasattr(category_name, 'name') else category_name)
                     
                     # Update count for this category
-                    category_counts[category_name] = category_counts.get(category_name, 0) + 1
+                    category_counts[category_name.name if hasattr(category_name, 'name') else category_name] = category_counts.get(category_name.name if hasattr(category_name, 'name') else category_name, 0) + 1
                     
                     logger.info(f"Email {msg_id} processed successfully and marked in database")
             except Exception as e:
