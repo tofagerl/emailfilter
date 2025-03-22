@@ -86,6 +86,10 @@ class Category:
         self.description = description
         self.folder_name = folder_name or name
 
+    def __str__(self) -> str:
+        """Return the category name as string representation."""
+        return self.name
+
 
 class EmailCategorizer:
     """Categorizes emails using OpenAI API."""
@@ -172,11 +176,13 @@ class EmailCategorizer:
             category_result: The final category assigned
         """
         try:
-            # Log a summary to the application log
+            # Extract sender name from email address
+            from_addr = email.get('from', '')
+            sender_name = from_addr.split('<')[0].strip() if '<' in from_addr else from_addr
+            
+            # Log a concise summary to the application log
             logger.info(
-                f"Categorized email: "
-                f"From: {email.get('from', '')[:40]}... | "
-                f"To: {email.get('to', '')[:40]}... | "
+                f"Categorized: {sender_name} | "
                 f"Subject: {email.get('subject', '')[:40]}... | "
                 f"Category: {category_result}"
             )
