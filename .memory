@@ -156,3 +156,14 @@ All tests use pytest framework and are located in tests/
   - Database path via MAILMIND_STATE_DIR env var
   - Default path: ~/.mailmind/processed_emails.db
   - Supports in-memory database for testing 
+
+# Important rules for handling sensitive data and git:
+- Never commit sensitive information (API keys, passwords, tokens)
+- Never commit config files that are excluded by .gitignore
+- Never force add files that are ignored by .gitignore
+- Instead:
+  - Use environment variables for sensitive data
+  - Use example config files (like config.yaml.example) for documentation
+  - Respect .gitignore rules
+
+# Important methods: 
