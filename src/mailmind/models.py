@@ -13,6 +13,10 @@ class Category:
     description: str
     foldername: str
     
+    def __post_init__(self):
+        """Ensure name is uppercase after initialization."""
+        self.name = self.name.upper()
+    
     def __str__(self) -> str:
         return self.name
 
