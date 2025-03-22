@@ -502,6 +502,34 @@ class EmailProcessor:
                 time.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
+    def _process_unprocessed_emails(self, client: IMAPClient, unprocessed_emails: Dict[int, Email], account: EmailAccount, folder: str) -> None:
+        """Process unprocessed emails.
+        
+        Args:
+            client: The IMAP client
+            unprocessed_emails: Dictionary of unprocessed emails
+            account: The email account
+            folder: The folder being processed
+        """
+        try:
+            # Categorize emails
+            categorized_emails = self.categorize_emails(
+                client,
+                unprocessed_emails,
+                account,
+                self.config_manager.options.batch_size
+            )
+            
+            # Process categorized emails
+            self.process_categorized_emails(
+                client,
+                categorized_emails,
+                account,
+                folder
+            )
+        except Exception as e:
+            logger.error(f"Error processing unprocessed emails: {e}")
+            raise
 
 def main(config_path: str, daemon_mode: bool = False) -> None:
     """Main entry point for the email processor.
