@@ -389,18 +389,23 @@ class IMAPManager:
             True if successful, False otherwise
         """
         try:
+            logger.debug(f"Starting to move email {msg_id} to {target_folder}")
+            
             # Ensure target folder exists
             self.ensure_folder_exists(client, target_folder)
+            logger.debug(f"Target folder {target_folder} exists or was created")
             
             # Check if the message is unread before moving
             response = client.fetch([msg_id], ['FLAGS', 'ENVELOPE'])
             is_unread = b'\\Seen' not in response[msg_id][b'FLAGS']
+            logger.debug(f"Email {msg_id} unread status: {is_unread}")
             
             # Get message identifiers to find it after moving
             envelope = response[msg_id][b'ENVELOPE']
             message_id = envelope.message_id
             subject = envelope.subject
             date = envelope.date
+            logger.debug(f"Email {msg_id} identifiers - Message-ID: {message_id}, Subject: {subject}, Date: {date}")
             
             # Move the message
             client.move(msg_id, target_folder)
@@ -408,6 +413,7 @@ class IMAPManager:
             
             # If the message was unread, make sure it stays unread in the target folder
             if is_unread:
+                logger.debug(f"Preserving unread status for email {msg_id} in {target_folder}")
                 # Select the target folder
                 client.select_folder(target_folder)
                 
@@ -416,19 +422,24 @@ class IMAPManager:
                     # Search by Message-ID header
                     search_criteria = ['HEADER', 'Message-ID', message_id.decode('utf-8', errors='ignore')]
                     messages = client.search(search_criteria)
+                    logger.debug(f"Searching for email by Message-ID: {message_id}")
                 elif subject and date:
                     # Fallback: search by subject and date
                     subject_str = subject.decode('utf-8', errors='ignore') if isinstance(subject, bytes) else str(subject)
                     search_criteria = ['SUBJECT', subject_str]
                     messages = client.search(search_criteria)
+                    logger.debug(f"Searching for email by subject: {subject_str}")
                 else:
                     # Last resort: get recent messages
                     messages = client.search(['RECENT'])
+                    logger.debug("Searching for email in recent messages")
                 
                 if messages:
                     # Remove the Seen flag to keep it unread
                     client.remove_flags(messages, [b'\\Seen'])
                     logger.debug(f"Preserved unread status for {len(messages)} emails in {target_folder}")
+                else:
+                    logger.debug(f"Could not find email {msg_id} in target folder {target_folder} to preserve unread status")
             
             return True
         except Exception as e:
