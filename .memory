@@ -1,0 +1,67 @@
+# MailMind Project Memory
+
+## Core Purpose
+- Email categorization and management system using AI
+- Processes emails from multiple accounts via IMAP
+- Uses OpenAI's GPT models for email classification
+- Moves emails to appropriate folders based on AI categorization
+
+## Key Components
+1. Configuration (config.yaml)
+   - OpenAI settings (API key, model, temperature, etc.)
+   - Email account configurations
+   - Processing options
+   - Logging settings
+
+2. Email Accounts
+   - Supports multiple email accounts
+   - Each account has:
+     - IMAP connection details
+     - Custom categories/folders
+     - Processing rules
+
+3. Categories
+   - Predefined categories per account
+   - Each category has:
+     - Name
+     - Description
+     - Target folder
+
+4. Processing Features
+   - Batch processing
+   - Lookback period for historical emails
+   - Minimum samples for training
+   - Test set validation
+   - IMAP IDLE support
+
+5. State Management
+   - Local SQLite database for tracking processed emails
+   - CLI tools for state management
+
+## Environment Variables
+Key overrides:
+- OPENAI_API_KEY
+- MAILMIND_OPENAI_MODEL
+- MAILMIND_OPENAI_TEMPERATURE
+- MAILMIND_OPENAI_MAX_TOKENS
+- MAILMIND_OPENAI_BATCH_SIZE
+- MAILMIND_MOVE_EMAILS
+- MAILMIND_MAX_EMAILS
+- MAILMIND_LOOKBACK_DAYS
+- MAILMIND_MIN_SAMPLES
+- MAILMIND_TEST_SIZE
+- MAILMIND_IDLE_TIMEOUT
+- MAILMIND_RECONNECT_DELAY
+- MAILMIND_LOG_LEVEL
+- MAILMIND_LOG_FILE
+- MAILMIND_LOG_FORMAT
+
+## Important Paths
+- Config: config.yaml
+- Logs: ~/.mailmind/logs/mailmind.log
+- State DB: ~/.emailfilter/processed_emails.db
+
+## CLI Commands
+- View state: python -m emailfilter.cli state view
+- Clean state: python -m emailfilter.cli state clean
+- Reset state: python -m emailfilter.cli state reset 
