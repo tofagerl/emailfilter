@@ -16,6 +16,7 @@ import time
 from mailmind.imap_manager import IMAPManager
 from imapclient.exceptions import IMAPClientError
 import json
+from mailmind.config import ConfigManager
 
 class IMAPError(Exception):
     """Base class for IMAP errors."""
@@ -25,11 +26,12 @@ class IMAPError(Exception):
 def mock_config():
     """Create a mock configuration file for testing."""
     config = {
-        'openai_api_key': 'test-key',
         'openai': {
+            'api_key': 'test-key',
             'model': 'gpt-4',
             'temperature': 0.7,
-            'max_tokens': 1000
+            'max_tokens': 1000,
+            'batch_size': 10
         },
         'accounts': [{
             'name': 'test',
@@ -71,7 +73,16 @@ def mock_config():
             'batch_size': 10,
             'lookback_days': 30,
             'min_samples_per_category': 3,
-            'test_size': 0.2
+            'test_size': 0.2,
+            'move_emails': True,
+            'max_emails_per_run': 100,
+            'idle_timeout': 300,
+            'reconnect_delay': 5
+        },
+        'logging': {
+            'level': 'DEBUG',
+            'file': None,
+            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         }
     }
     

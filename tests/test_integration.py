@@ -3,7 +3,7 @@ import os
 import json
 from unittest import mock
 from mailmind.models import EmailAccount
-from mailmind.config_manager import ConfigManager
+from mailmind.config import ConfigManager
 from mailmind.imap_manager import IMAPManager
 from mailmind.sqlite_state_manager import SQLiteStateManager
 from mailmind.email_processor import EmailProcessor

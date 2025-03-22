@@ -12,7 +12,7 @@ from imapclient import IMAPClient
 
 from mailmind import categorizer
 from .models import Email, EmailAccount, ProcessingOptions
-from .config_manager import ConfigManager
+from .config import ConfigManager
 from .sqlite_state_manager import SQLiteStateManager
 from .imap_manager import IMAPManager
 

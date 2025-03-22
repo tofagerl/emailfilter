@@ -4,7 +4,7 @@ import sys
 import logging
 import os
 from mailmind.email_processor import main as email_processor_main
-from mailmind.config_manager import ConfigManager
+from mailmind.config import ConfigManager
 from mailmind.imap_manager import IMAPManager
 from mailmind.sqlite_state_manager import SQLiteStateManager
 from mailmind.email_processor import EmailProcessor
