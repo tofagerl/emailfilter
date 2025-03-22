@@ -108,3 +108,51 @@ All tests use pytest framework and are located in tests/
 - Contains shared test fixtures and configuration
 - Sets up mock servers and test data
 - Configures test environment 
+
+## Core Modules
+
+### Pre-Training Manager (pre_training.py)
+- Manages pre-training data preparation and analysis
+- Key features:
+  - Category change monitoring
+  - Training data preparation
+  - Category distribution analysis
+  - Ambiguous category detection
+- Configuration options:
+  - Check interval for category monitoring
+  - Lookback period for email changes
+  - Minimum samples per category
+  - Test set size
+  - Random state for reproducibility
+- Uses:
+  - SQLiteStateManager for state tracking
+  - EmailProcessor for email handling
+  - EmailCategorizer for categorization
+  - IMAPManager for email access
+
+### SQLite State Manager (sqlite_state_manager.py)
+- Manages processed email state using SQLite
+- Key features:
+  - Email processing tracking
+  - Category management
+  - Database connection pooling
+  - Query interface for processed emails
+  - Category statistics
+- Database schema:
+  - processed_emails table:
+    - Email metadata (ID, account, hash, message_id, etc.)
+    - Processing status and category
+    - Timestamps
+  - categories table:
+    - Category definitions
+    - Folder mappings
+- Important methods:
+  - is_email_processed(): Check processing status
+  - mark_email_as_processed(): Update processing state
+  - cleanup_old_entries(): Remove old records
+  - get_category_stats(): Get category distribution
+  - query_processed_emails(): Search processed emails
+- Configuration:
+  - Database path via MAILMIND_STATE_DIR env var
+  - Default path: ~/.mailmind/processed_emails.db
+  - Supports in-memory database for testing 
