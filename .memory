@@ -67,16 +67,13 @@ Key overrides:
 - Reset state: python -m emailfilter.cli state reset 
 
 ## Integration Tests
-- Located in tests/integration/
+- Located in tests/test_integration.py
 - Uses pytest framework
 - Tests cover:
-  - Email processing pipeline
-  - IMAP connection handling
-  - OpenAI API integration
-  - State management
-  - Category classification
-  - Email movement
-- Run with: pytest tests/integration/
+  - Email categorization flow
+  - Category distribution
+  - Training data preparation
+- Run with: pytest tests/test_integration.py
 - Requires test config in tests/integration/test_config.yaml
 - Uses mock IMAP server for testing
 - Mocks OpenAI API calls to avoid real API usage 
