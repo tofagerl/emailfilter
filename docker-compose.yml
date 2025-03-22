@@ -1,38 +1,48 @@
 services:
   mailmind:
-    build: .
+    image: tofagerl/mailmind:latest
     container_name: mailmind
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - TZ=${TZ:-UTC}
+    env_file: env.env
     volumes:
-      - ./config:/config
-      - /raid/media/config/mailmind:/home/mailmind
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
-    # Explicit healthcheck
-    healthcheck:
-      test: ["CMD", "mailmind", "--version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
-    # Logging configuration
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "/raid/media/config/emailfilter/config:/config"
+      - "/raid/media/config/emailfilter:/home/emailfilter"
+    networks:
+      - mailmind_network
+      - media_network
     logging:
-      driver: "json-file"
+      driver: loki
       options:
-        max-size: "10m"
-        max-file: "3"
-    # Uncomment to run in one-time processing mode instead of daemon mode
-    # command: ["imap", "--config", "/config/config.yaml"]
-    # Uncomment to run with specific options
-    # command: ["imap", "--config", "/config/config.yaml", "--dry-run"]
+        loki-url: "http://mailmind-grafana-agent:3100/loki/api/v1/push"
+        loki-external-labels: "container=emailfilter,service=emailfilter"
+        loki-pipeline-stages: |
+          - regex:
+              expression: '(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3})\s*-\s*(?P<module>[\w\.]+)\s*-\s*(?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL)'
+          - labels:
+              level: level
+              module: module
+          - timestamp:
+              source: timestamp
+              format: '2006-01-02 15:04:05,000'
+
+  grafana-agent:
+    image: grafana/agent:latest
+    container_name: mailmind-grafana-agent
+    restart: unless-stopped
+    volumes:
+      - ./grafana-agent.yml:/etc/agent/agent.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["/usr/bin/grafana-agent", "-config.file=/etc/agent/agent.yaml"]
+    networks:
+      - mailmind_network
+      - media_network
+    mem_limit: 256m
+    cpu_shares: 128
+
+networks:
+  mailmind_network:
+    driver: bridge
+  media_network:
+    external: true
+    name: media_media_network

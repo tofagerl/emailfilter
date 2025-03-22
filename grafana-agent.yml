@@ -1,0 +1,63 @@
+server:
+  log_level: info
+
+metrics:
+  global:
+    remote_write:
+      - url: >-
+          https://prometheus-prod-39-prod-eu-north-0.grafana.net/api/prom/push
+        basic_auth:
+          username: 1380972
+          password: >-
+            glc_eyJvIjoiMTM4MDk3MiIsIm4iOiJzdGFjay0xMjA0OTMyLWFsbG95LW1lZGlhIiwiayI6Ij
+            IyYWNZOFQ5OG1ZSTFWMjVQU09rUVIzMSIsIm0iOnsiciI6InByb2QtZXUtbm9ydGgtMCJ9fQ==
+
+logs:
+  configs:
+    - name: default
+      positions:
+        filename: /tmp/positions.yaml
+      scrape_configs:
+        - job_name: docker
+          docker_sd_configs:
+            - host: unix:///var/run/docker.sock
+              refresh_interval: 5s
+          relabel_configs:
+            - source_labels: ["__meta_docker_container_name"]
+              regex: "/(.*)"
+              target_label: "container"
+      clients:
+        - url: >-
+            https://1380972:glc_eyJvIjoiMTM4MDk3MiIsIm4iOiJzdGFjay0xMjA0OTMyLWFsbG95LW1l
+            ZGlhIiwiayI6IjIyYWNZOFQ5OG1ZSTFWMjVQU09rUVIzMSIsIm0iOnsiciI6InByb2QtZXUtbm9
+            ydGgtMCJ9fQ==@logs-prod-025.grafana.net/loki/api/v1/push
+          tenant_id: 1380972
+          external_labels:
+            stack: "mailmind-stack"
+
+traces:
+  configs:
+    - name: default
+      receivers:
+        jaeger:
+          protocols:
+            grpc:
+              endpoint: localhost:14250
+            thrift_http:
+              endpoint: localhost:14268
+        zipkin:
+          endpoint: localhost:9411
+        otlp:
+          protocols:
+            grpc:
+              endpoint: localhost:4317
+            http:
+              endpoint: localhost:4318
+      remote_write:
+        - endpoint: >-
+            https://tempo-prod-18-prod-eu-north-0.grafana.net/api/tempo/push
+          basic_auth:
+            username: 1380972
+            password: >-
+              glc_eyJvIjoiMTM4MDk3MiIsIm4iOiJzdGFjay0xMjA0OTMyLWFsbG95LW1lZGlhIiwiayI6I
+              jIyYWNZOFQ5OG1ZSTFWMjVQU09rUVIzMSIsIm0iOnsiciI6InByb2QtZXUtbm9ydGgtMCJ9fQ==
