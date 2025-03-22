@@ -207,7 +207,7 @@ class EmailCategorizer:
         return (
             "You are an email categorization assistant. Your task is to categorize "
             "emails into one of the following categories:\n\n"
-            f"{'\n'.join(category_lines)}\n\n"
+            f"{r'\n'.join(category_lines)}\n\n"
             "For each email, return a JSON object with the following fields:\n"
             "- category: The category name (must be one of the above)\n"
             "- confidence: A number between 0 and 100 indicating confidence\n"
